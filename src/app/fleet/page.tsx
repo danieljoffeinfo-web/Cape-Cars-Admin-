@@ -1,24 +1,20 @@
 import Nav from '@/components/nav'
 import Footer from '@/components/footer'
 import FleetGrid from '@/components/fleet-grid'
-import { createClient } from "@/lib/supabase/server"
 import { FLEET } from '@/lib/fleet'
 import type { Vehicle } from '@/lib/fleet'
+import { getFleetAvailability } from '@/lib/telegram-admin'
 
 export const metadata = { title: 'Fleet — Car Demo' }
-export const revalidate = 60
+export const dynamic = 'force-dynamic'
 
 export default async function FleetPage() {
   let vehicles: Vehicle[] = []
   try {
-    const supabase = createClient()
-    const { data } = await supabase
-      .from('vehicles')
-      .select('*')
-      .neq('status', 'Service')
-      .order('sort_order', { ascending: true })
-    if (data && data.length > 0) {
-      vehicles = data as Vehicle[]
+    const data = await getFleetAvailability()
+    const visibleVehicles = data.filter((vehicle) => vehicle.status !== 'Service')
+    if (visibleVehicles.length > 0) {
+      vehicles = visibleVehicles as Vehicle[]
     } else {
       vehicles = FLEET.map((c, i) => ({
         ...c,

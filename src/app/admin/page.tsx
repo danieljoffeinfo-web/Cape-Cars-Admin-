@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useAdminLanguage } from './admin-language'
 
 type DashboardMetrics = {
   totalVehicles: number
@@ -49,6 +50,7 @@ const QUICK_ACTIONS = [
 
 export default function AdminDashboard() {
   const supabase = createClient()
+  const { t } = useAdminLanguage()
   const [loading, setLoading] = useState(true)
   const [metrics, setMetrics] = useState<DashboardMetrics>({
     totalVehicles: 0,
@@ -71,14 +73,13 @@ export default function AdminDashboard() {
 
       const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()
 
-      const [vehiclesRes, customersRes, rentalsRes, invoicesRes, bookingsRes, telegramCustomersRes, telegramBookingsRes] = await Promise.all([
+      const [vehiclesRes, customersRes, rentalsRes, invoicesRes, bookingsRes, telegramSummaryRes] = await Promise.all([
         supabase.from('vehicles').select('status'),
         supabase.from('customers').select('id'),
         supabase.from('rentals').select('status'),
         supabase.from('invoices').select('status,total_amount,created_at'),
         supabase.from('bookings').select('status'),
-        supabase.from('telegram_customers').select('id,full_name,telegram_name,phone,updated_at').order('updated_at', { ascending: false }).limit(5),
-        supabase.from('telegram_bookings').select('status'),
+        fetch('/api/admin/telegram/summary', { cache: 'no-store' }),
       ])
 
       const vehicles = vehiclesRes.data ?? []
@@ -86,8 +87,10 @@ export default function AdminDashboard() {
       const rentals = rentalsRes.data ?? []
       const invoices = invoicesRes.data ?? []
       const bookings = bookingsRes.data ?? []
-      const telegramCustomers = (telegramCustomersRes.data as TelegramLead[] | null) ?? []
-      const telegramBookings = telegramBookingsRes.data ?? []
+      const telegramSummary = telegramSummaryRes.ok
+        ? await telegramSummaryRes.json()
+        : { latestTelegramLeads: [], telegramLeadCount: 0, awaitingPayment: 0 }
+      const telegramCustomers = (telegramSummary.latestTelegramLeads as TelegramLead[] | undefined) ?? []
 
       const revenueMtd = invoices
         .filter((invoice: any) => invoice.status === 'paid' && invoice.created_at >= monthStart)
@@ -102,12 +105,12 @@ export default function AdminDashboard() {
         activeRentals: rentals.filter((item: any) => item.status === 'active').length,
         pendingBookings: bookings.filter((item: any) => item.status === 'new').length,
         confirmedBookings: bookings.filter((item: any) => item.status === 'confirmed').length,
-        telegramLeads: telegramCustomersRes.error ? 0 : telegramCustomers.length,
-        awaitingPayment: telegramBookingsRes.error ? 0 : telegramBookings.filter((item: any) => item.status === 'awaiting_payment_confirmation').length,
+        telegramLeads: telegramSummary.telegramLeadCount ?? 0,
+        awaitingPayment: telegramSummary.awaitingPayment ?? 0,
         revenueMtd,
       })
 
-      setLatestTelegramLeads(telegramCustomersRes.error ? [] : telegramCustomers)
+      setLatestTelegramLeads(telegramCustomers)
       setLoading(false)
     }
 
@@ -122,18 +125,18 @@ export default function AdminDashboard() {
         <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div>
             <div className="text-[11px] uppercase tracking-[0.32em] text-white/45">Cape Cars admin</div>
-            <h1 className="mt-3 text-3xl font-light tracking-tight md:text-4xl">Simple control room for bookings, cars, and customer handover.</h1>
+            <h1 className="mt-3 text-3xl font-light tracking-tight md:text-4xl">{t('Simple control room for bookings, cars, and customer handover.', 'Простая панель для бронирований, автомобилей и передачи клиенту.')}</h1>
             <p className="mt-3 max-w-2xl text-sm text-white/65 md:text-[15px]">
-              This is the client-facing control panel: check new Telegram leads, update vehicle availability, and move bookings through to payment confirmation.
+              {t('This is the client-facing control panel: check new Telegram leads, update vehicle availability, and move bookings through to payment confirmation.', 'Панель для клиента: проверяйте новые лиды из Telegram, обновляйте доступность авто и проводите бронирования до подтверждения оплаты.')}
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3 md:min-w-[320px]">
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <div className="text-[10px] uppercase tracking-[0.24em] text-white/40">Revenue MTD</div>
+              <div className="text-[10px] uppercase tracking-[0.24em] text-white/40">{t('Revenue MTD', 'Выручка за месяц')}</div>
               <div className="mt-2 text-2xl font-light">{loading ? '—' : money(metrics.revenueMtd)}</div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <div className="text-[10px] uppercase tracking-[0.24em] text-white/40">Awaiting payment</div>
+              <div className="text-[10px] uppercase tracking-[0.24em] text-white/40">{t('Awaiting payment', 'Ожидает оплату')}</div>
               <div className="mt-2 text-2xl font-light">{loading ? '—' : metrics.awaitingPayment}</div>
             </div>
           </div>

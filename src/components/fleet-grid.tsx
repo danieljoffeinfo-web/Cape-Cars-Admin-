@@ -7,12 +7,22 @@ import type { Vehicle } from '@/lib/fleet'
 
 const CATS = ['All', 'Track', 'Supercar', 'Grand Tourer', 'Electric', 'Daily']
 
+function formatBookedRange(car: Vehicle) {
+  const range = car.blockedRanges?.[0]
+  if (!range) return null
+  if (range.startDate === range.endDate) return range.startDate
+  return `${range.startDate} → ${range.endDate}`
+}
+
 function FleetCard({ car }: { car: Vehicle }) {
-  const bookable = car.status === 'Available'
+  const bookedRange = formatBookedRange(car)
+  const isBooked = Boolean(car.isBlocked || car.status === 'Booked')
+  const bookable = car.status === 'Available' && !isBooked
+  const displayStatus = isBooked ? 'Booked' : car.status
   return (
     <GlassDark className="rounded-2xl overflow-hidden flex flex-col group">
       {/* Image */}
-      <div className="aspect-[5/4] relative bg-gradient-to-br from-white/[0.08] via-white/[0.03] to-white/[0.02] overflow-hidden">
+      <div className="aspect-[16/11] relative bg-gradient-to-br from-white/[0.08] via-white/[0.03] to-white/[0.02] overflow-hidden">
         {car.image_url ? (
           <img src={car.image_url} alt={car.model} className="absolute inset-0 w-full h-full object-cover" />
         ) : (
@@ -29,8 +39,8 @@ function FleetCard({ car }: { car: Vehicle }) {
 
         {/* Status pill */}
         <div className="absolute top-3 left-3 flex items-center gap-1.5 text-[10px] tracking-[0.2em] uppercase px-2.5 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/15 text-white">
-          <span className={`w-1.5 h-1.5 rounded-full ${bookable ? 'bg-emerald-400' : car.status === 'Booked' ? 'bg-amber-400' : 'bg-white/40'}`} />
-          {car.status}
+          <span className={`w-1.5 h-1.5 rounded-full ${bookable ? 'bg-emerald-400' : isBooked ? 'bg-amber-400' : 'bg-white/40'}`} />
+          {displayStatus}
         </div>
 
         {/* Category tag */}
@@ -45,7 +55,7 @@ function FleetCard({ car }: { car: Vehicle }) {
       </div>
 
       {/* Card body */}
-      <div className="p-5 flex-1 flex flex-col bg-white">
+      <div className="p-4 flex-1 flex flex-col bg-white">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-[10px] tracking-[0.25em] uppercase text-neutral-400">Model</div>
@@ -64,7 +74,14 @@ function FleetCard({ car }: { car: Vehicle }) {
           <div className="flex items-center gap-1.5 truncate"><Icon.fuel  width={13} height={13} />{car.fuel}</div>
         </div>
 
-        <div className="mt-5 flex items-center justify-between pt-4 border-t border-black/10">
+        {bookedRange && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-amber-600">Booked</div>
+            <div className="mt-1 font-medium">{bookedRange}</div>
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center justify-between pt-3 border-t border-black/10">
           <button className="text-sm text-neutral-500 hover:text-neutral-900">Details</button>
           <button
             disabled={!bookable}
@@ -74,7 +91,7 @@ function FleetCard({ car }: { car: Vehicle }) {
                 : 'bg-neutral-100 text-neutral-400 border border-neutral-200 cursor-not-allowed'
             }`}
           >
-            {bookable ? 'Reserve' : car.status}
+            {bookable ? 'Reserve' : displayStatus}
             {bookable && <Icon.arrow width={12} height={12} />}
           </button>
         </div>
@@ -100,12 +117,12 @@ export default function FleetGrid({ cars: initialCars }: { cars: Vehicle[] }) {
   return (
     <>
       {/* Page header */}
-      <section className="relative pt-32 md:pt-40 pb-12 border-b border-black/[0.08]">
-        <div className="max-w-7xl mx-auto px-6 md:px-10">
+      <section className="relative pt-24 md:pt-28 pb-10 border-b border-black/[0.08]">
+        <div className="max-w-[1400px] mx-auto px-5 md:px-8">
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
             <div>
               <div className="text-[11px] tracking-[0.3em] uppercase text-neutral-500">Fleet</div>
-              <h1 className="mt-4 text-5xl md:text-7xl font-light leading-[0.95] tracking-tight text-neutral-900">
+              <h1 className="mt-4 text-4xl md:text-6xl font-light leading-[0.95] tracking-tight text-neutral-900">
                 Eleven cars, <br /><span className="italic text-neutral-500">one garage.</span>
               </h1>
             </div>
@@ -115,7 +132,7 @@ export default function FleetGrid({ cars: initialCars }: { cars: Vehicle[] }) {
           </div>
 
           {/* Filters */}
-          <div className="mt-10 rounded-2xl p-3 flex flex-col md:flex-row md:items-center gap-3 bg-white border border-black/[0.06] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+          <div className="mt-8 rounded-2xl p-2.5 flex flex-col md:flex-row md:items-center gap-3 bg-white border border-black/[0.06] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
             <div className="flex items-center gap-1 overflow-x-auto">
               {CATS.map(c => (
                 <button
@@ -156,11 +173,11 @@ export default function FleetGrid({ cars: initialCars }: { cars: Vehicle[] }) {
       </section>
 
       {/* Grid */}
-      <section className="max-w-7xl mx-auto px-6 md:px-10 py-14">
+      <section className="max-w-[1400px] mx-auto px-5 md:px-8 py-10">
         <div className="mb-6 text-sm text-neutral-500 tabular-nums">
           {cars.length} {cars.length === 1 ? 'car' : 'cars'} ready to drive
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {cars.map(c => <FleetCard key={c.id} car={c} />)}
         </div>
       </section>

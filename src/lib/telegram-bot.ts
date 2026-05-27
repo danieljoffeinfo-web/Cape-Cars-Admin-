@@ -1,13 +1,15 @@
 import { randomUUID } from 'crypto'
-import { CATEGORY_ORDER, CATEGORY_PRICING, TELEGRAM_CATALOG, getTelegramVehicleDisplay, type VehicleCategory } from '@/lib/telegram-catalog'
-import { buildTelegramProxyUrl, getLatestTelegramBookingForChat, getVehicleById, getVehiclesForCustomerCategory, logTelegramConversation, type VehicleBlockedRange, upsertTelegramBooking, upsertTelegramCustomer } from '@/lib/telegram-admin'
-import { notifyAdminNewBooking } from '@/lib/telegram-admin-bot'
+import { createClient } from '@supabase/supabase-js'
+import { CATEGORY_ORDER, TELEGRAM_CATALOG, getTelegramBodyType, getTelegramSegment, getTelegramVehicleDisplay, type TelegramBodyType, type TelegramSegment, type VehicleCategory } from '@/lib/telegram-catalog'
+import { buildTelegramProxyUrl, getLatestTelegramBookingForChat, getTelegramSession, getVehicleById, getVehiclesForCustomerCategory, logTelegramConversation, publicBaseUrl, type VehicleBlockedRange, upsertTelegramBooking, upsertTelegramCustomer, upsertTelegramSession } from '@/lib/telegram-admin'
+import { notifyAdminCashPayment, notifyAdminManagerRequest, notifyAdminNewBooking, notifyAdminPaymentProof } from '@/lib/telegram-admin-bot'
 
 type Locale = 'en' | 'ru'
 
 export type SessionStep =
   | 'choosing_language'
   | 'choosing_category'
+  | 'choosing_body_type'
   | 'choosing_vehicle'
   | 'awaiting_start_date'
   | 'awaiting_end_date'
@@ -16,6 +18,9 @@ export type SessionStep =
   | 'awaiting_phone'
   | 'awaiting_id_image'
   | 'awaiting_license_image'
+  | 'awaiting_license_back_image'
+  | 'awaiting_terms_acceptance'
+  | 'awaiting_payment_proof'
   | 'completed'
 
 export type BotSession = {
@@ -28,7 +33,9 @@ export type BotSession = {
   telegram_username?: string | null
   customer_full_name?: string | null
   customer_phone?: string | null
+  selected_segment?: TelegramSegment | null
   selected_category?: VehicleCategory | null
+  selected_body_type?: TelegramBodyType | null
   selected_vehicle_id?: string | null
   selected_vehicle_model?: string | null
   selected_vehicle_display_model?: string | null
@@ -39,6 +46,7 @@ export type BotSession = {
   total_amount?: number | null
   id_file_id?: string | null
   license_file_id?: string | null
+  license_back_file_id?: string | null
   blocked_ranges?: VehicleBlockedRange[]
   updated_at?: string
 }
@@ -63,13 +71,14 @@ export type TelegramUpdate = {
   callback_query?: CallbackQuery
 }
 
-type TelegramInlineButton = { text: string; callback_data: string }
+type TelegramInlineButton = { text: string; callback_data?: string; url?: string }
 
 type VehicleChoice = {
   id: string
   model: string
   bookingModel: string
   category: VehicleCategory
+  bodyType: TelegramBodyType
   rate: number
   status: string
   imageUrl: string
@@ -79,18 +88,59 @@ type VehicleChoice = {
 }
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN
+const PUBLIC_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const PUBLIC_SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const memorySessions = new Map<string, BotSession>()
 
-const CATEGORY_LABELS: Record<Locale, Record<VehicleCategory, string>> = {
+type BotControllerConfig = {
+  botEnabled?: boolean
+  customerText?: Record<string, string>
+  adminText?: Record<string, string>
+  buttonText?: Record<string, string>
+  customButtons?: Record<string, Array<{
+    id: string
+    labelEn: string
+    labelRu: string
+    action: 'manager' | 'url'
+    url?: string | null
+  }>>
+}
+
+const SEGMENT_ORDER: TelegramSegment[] = ['luxury', 'mid', 'economy']
+
+const SEGMENT_LABELS: Record<Locale, Record<TelegramSegment, string>> = {
   en: {
-    'Luxury Vehicles': 'Luxury Vehicles',
-    'Mid Tier Vehicles': 'Mid Tier Vehicles',
-    'Large Vehicles': 'Large Vehicles',
+    luxury: 'Luxury',
+    mid: 'Mid-range',
+    economy: 'Economy',
   },
   ru: {
-    'Luxury Vehicles': 'Люксовые автомобили',
-    'Mid Tier Vehicles': 'Автомобили среднего класса',
-    'Large Vehicles': 'Большие автомобили',
+    luxury: 'Люкс',
+    mid: 'Средний класс',
+    economy: 'Эконом',
+  },
+}
+
+const BODY_TYPE_LABELS: Record<Locale, Record<TelegramBodyType, string>> = {
+  en: {
+    SUV: 'SUVs',
+    Sedan: 'Sedans',
+    Convertible: 'Convertibles',
+    Coupe: 'Coupes',
+    Hatchback: 'Hatchbacks',
+    Van: 'Vans',
+    Minibus: 'Minibuses',
+    'People Mover': 'People Movers',
+  },
+  ru: {
+    SUV: 'SUV',
+    Sedan: 'Седаны',
+    Convertible: 'Кабриолеты',
+    Coupe: 'Купе',
+    Hatchback: 'Хэтчбеки',
+    Van: 'Фургоны',
+    Minibus: 'Микроавтобусы',
+    'People Mover': 'Минивэны',
   },
 }
 
@@ -110,16 +160,20 @@ const TEXT = {
     ru: '⛰️ Добро пожаловать в Cape Cars Rentals. Посмотрите доступные автомобили ниже.',
   },
   chooseCategory: {
-    en: 'Choose a vehicle category below.',
-    ru: 'Выберите категорию автомобиля ниже.',
+    en: 'Choose a vehicle class below.',
+    ru: 'Выберите класс автомобиля ниже.',
   },
   categoryIntro: {
-    en: (category: VehicleCategory, rate?: number | null) => rate ? `${CATEGORY_LABELS.en[category]} — ${formatCurrency(rate)} per day. Choose a vehicle below.` : `${CATEGORY_LABELS.en[category]}. Choose a vehicle below.`,
-    ru: (category: VehicleCategory, rate?: number | null) => rate ? `${CATEGORY_LABELS.ru[category]} — ${formatCurrency(rate)} в день. Выберите автомобиль ниже.` : `${CATEGORY_LABELS.ru[category]}. Выберите автомобиль ниже.`,
+    en: (segment: TelegramSegment) => `${SEGMENT_LABELS.en[segment]} vehicles. Browse by body type below.`,
+    ru: (segment: TelegramSegment) => `${SEGMENT_LABELS.ru[segment]}. Ниже автомобили по типу кузова.`,
   },
   chooseVehicle: {
     en: 'Please choose a vehicle from the category list above.',
     ru: 'Пожалуйста, выберите автомобиль из списка выше.',
+  },
+  chooseBodyType: {
+    en: 'Choose a body type below.',
+    ru: 'Выберите тип кузова ниже.',
   },
   bookingVehicle: {
     en: (model: string) => `Book ${model}`,
@@ -166,12 +220,16 @@ const TEXT = {
     ru: 'Пожалуйста, отправьте чёткое фото вашего ID или паспорта.',
   },
   license: {
-    en: 'Thanks. Now please send a clear image of the driver’s license.',
-    ru: 'Спасибо. Теперь отправьте чёткое фото водительского удостоверения.',
+    en: 'Thanks. Now please send a clear image of the FRONT of your driver’s license.',
+    ru: 'Спасибо. Теперь отправьте чёткое фото ПЕРЕДНЕЙ стороны водительского удостоверения.',
+  },
+  licenseBack: {
+    en: 'Perfect. Now send a clear image of the BACK of your driver’s license.',
+    ru: 'Отлично. Теперь отправьте чёткое фото ОБРАТНОЙ стороны водительского удостоверения.',
   },
   done: {
-    en: (bookingCode: string) => `Perfect. Your booking ${bookingCode} is confirmed in the Cape Cars system and the dates are now reserved. We'll send you the next steps shortly.`,
-    ru: (bookingCode: string) => `Отлично. Ваше бронирование ${bookingCode} подтверждено в системе Cape Cars, и даты уже зарезервированы. Скоро отправим вам следующие шаги.`,
+    en: (bookingCode: string) => `Perfect. Your booking ${bookingCode} is confirmed in the Cape Cars system and the dates are now reserved.\n\nA manager will be in touch shortly.`,
+    ru: (bookingCode: string) => `Отлично. Ваше бронирование ${bookingCode} подтверждено в системе Cape Cars, и даты уже зарезервированы.\n\nМенеджер свяжется с вами в ближайшее время.`,
   },
   alreadyCompleted: {
     en: (bookingCode: string) => `Your booking ${bookingCode} is already locked in Cape Cars and those dates are reserved. Send /start only if you want to begin a new booking.`,
@@ -186,72 +244,105 @@ const TEXT = {
     ru: 'Сейчас в этой категории нет автомобилей.',
   },
   bookingConfirmed: {
-    en: '✅ Booking confirmed. Choose your language below to review the short rental terms.',
-    ru: '✅ Бронирование подтверждено. Выберите язык ниже, чтобы посмотреть краткие условия аренды.',
+    en: '✅ Booking confirmed. Choose your language below to review the rental terms.',
+    ru: '✅ Бронирование подтверждено. Выберите язык ниже, чтобы посмотреть условия аренды.',
   },
-  termsShort: {
-    en: [
-      'SHORT RENTAL TERMS',
-      '',
-      '• Driver must be 23+ with 2+ years driving experience',
-      '• Required: passport, driver license, WhatsApp number, payment proof',
-      '• Booking deposit: 5000 RUB',
-      '• Office handover: 21 Montague Drive, Montague Gardens, Cape Town, 7441',
-      '• Airport delivery: $100 each way',
-      '• After-hours delivery/return: double rate',
-      '• Return the car clean and with the same fuel level',
-      '• Late return: 1000 ZAR, over 3 hours = extra rental day',
-      '• No smoking, no third-party drivers, no taxi/delivery use, no drunk driving',
-      '• In an accident, contact the manager immediately and get a police case number',
-      '• Cancellation less than 5 days before start: prepayment is non-refundable',
-      '',
-      'Tap Accept to continue to payment details.',
-    ].join('\n'),
-    ru: [
-      'КРАТКИЕ УСЛОВИЯ АРЕНДЫ',
-      '',
-      '• Водитель: от 23 лет, стаж от 2 лет',
-      '• Нужно отправить: паспорт, водительское удостоверение, WhatsApp, подтверждение оплаты',
-      '• Предоплата за бронирование: 5000 ₽',
-      '• Выдача в офисе: 21 Montague Drive, Montague Gardens, Cape Town, 7441',
-      '• Доставка в аэропорт: 100$ в одну сторону',
-      '• Подача/возврат вне рабочего времени: двойной тариф',
-      '• Авто нужно вернуть чистым и с тем же уровнем топлива',
-      '• Опоздание с возвратом: 1000 ZAR, более 3 часов = дополнительный день аренды',
-      '• Запрещено: курение, передача третьим лицам, такси/доставка, вождение в нетрезвом виде',
-      '• При ДТП сразу свяжитесь с менеджером и получите номер дела в полиции',
-      '• При отмене менее чем за 5 дней предоплата не возвращается',
-      '',
-      'Нажмите «Принять», чтобы перейти к оплате.',
-    ].join('\n'),
+  termsDocumentCaption: {
+    en: 'Cape Cars rental terms. Read the document, then tap Accept below.',
+    ru: 'Условия аренды Cape Cars. Прочитайте документ и нажмите «Принять» ниже.',
+  },
+  termsDocumentViewCaption: {
+    en: 'Cape Cars rental terms and conditions are attached.',
+    ru: 'Условия аренды Cape Cars прикреплены.',
+  },
+  termsAcceptanceReminder: {
+    en: 'Please read and accept the rental terms above before payment details are sent.',
+    ru: 'Пожалуйста, прочитайте и примите условия аренды выше, после этого мы отправим реквизиты для оплаты.',
+  },
+  managerRequested: {
+    en: 'A manager has been notified and will reach out shortly. You can also continue browsing vehicles below.',
+    ru: 'Менеджер уже уведомлён и скоро свяжется с вами. Вы также можете продолжить просмотр автомобилей ниже.',
   },
   paymentDetails: {
-    en: [
+    en: (totalAmount?: number | null) => [
       'PAYMENT DETAILS',
       '',
       '+7-999-217-03-12',
       'Евгений Н.',
       'Альфа-Банк / Сбербанк / Т-Банк',
-      'Amount: 5000 RUB',
+      '',
+      'Deposit due now: 5000 RUB to secure the booking.',
+      totalAmount ? `Rental total: ${formatCurrency(totalAmount)}.` : null,
+      'The remaining rental balance is due upfront on collection, before the vehicle is released.',
       '',
       'Please send proof of payment after payment.',
-    ].join('\n'),
-    ru: [
+    ].filter(Boolean).join('\n'),
+    ru: (totalAmount?: number | null) => [
       'РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ',
       '',
       '+7-999-217-03-12',
       'Евгений Н.',
       'Альфа-Банк / Сбербанк / Т-Банк',
-      'Сумма: 5000 ₽',
+      '',
+      'Предоплата сейчас: 5000 ₽ для закрепления бронирования.',
+      totalAmount ? `Итоговая сумма аренды: ${formatCurrency(totalAmount)}.` : null,
+      'Оставшаяся сумма аренды оплачивается полностью при получении автомобиля, до передачи ключей.',
       '',
       'Пожалуйста, отправьте подтверждение оплаты после перевода.',
-    ].join('\n'),
+    ].filter(Boolean).join('\n'),
   },
   cashPayment: {
     en: 'Cash payment selected. A manager will be in touch shortly.',
     ru: 'Выбрана оплата наличными. Менеджер свяжется с вами в ближайшее время.',
   },
+  paymentProof: {
+    en: 'Please send a screenshot or photo of your payment confirmation here.',
+    ru: 'Пожалуйста, отправьте сюда скриншот или фото подтверждения оплаты.',
+  },
+  paymentProofReceived: {
+    en: '✅ Payment proof received. Cape Cars admin has been notified and will confirm shortly.\n\nA manager will be in touch shortly.',
+    ru: '✅ Подтверждение оплаты получено. Администратор Cape Cars уведомлён и скоро подтвердит оплату.\n\nМенеджер свяжется с вами в ближайшее время.',
+  },
 } as const
+
+async function getBotControllerConfig(): Promise<BotControllerConfig> {
+  const supabase = getPublicSupabaseClient()
+  if (!supabase) return {}
+
+  try {
+    const { data, error } = await supabase
+      .from('telegram_bot_settings')
+      .select('settings')
+      .eq('id', 'live')
+      .maybeSingle()
+
+    if (error) {
+      console.error('getBotControllerConfig failed', error)
+      return {}
+    }
+
+    return (data?.settings ?? {}) as BotControllerConfig
+  } catch (error) {
+    console.error('getBotControllerConfig exception', error)
+    return {}
+  }
+}
+
+function copy(config: BotControllerConfig, scope: 'customerText' | 'adminText' | 'buttonText', key: string, fallback: string) {
+  const value = config[scope]?.[key]
+  return typeof value === 'string' && value.trim() ? value : fallback
+}
+
+function customButtonRows(config: BotControllerConfig, nodeId: string, locale: Locale): TelegramInlineButton[][] {
+  return (config.customButtons?.[nodeId] ?? [])
+    .map((button): TelegramInlineButton[] | null => {
+      const text = (locale === 'ru' ? button.labelRu : button.labelEn)?.trim()
+      if (!text) return null
+      if (button.action === 'url' && button.url?.trim()) return [{ text, url: button.url.trim() }]
+      return [{ text, callback_data: 'manager_request' }]
+    })
+    .filter((row): row is TelegramInlineButton[] => Boolean(row))
+}
 
 function defaultSession(chatId: string): BotSession {
   return {
@@ -264,7 +355,9 @@ function defaultSession(chatId: string): BotSession {
     telegram_username: null,
     customer_full_name: null,
     customer_phone: null,
+    selected_segment: null,
     selected_category: null,
+    selected_body_type: null,
     selected_vehicle_id: null,
     selected_vehicle_model: null,
     selected_vehicle_display_model: null,
@@ -275,6 +368,7 @@ function defaultSession(chatId: string): BotSession {
     total_amount: null,
     id_file_id: null,
     license_file_id: null,
+    license_back_file_id: null,
     blocked_ranges: [],
     updated_at: new Date().toISOString(),
   }
@@ -291,6 +385,29 @@ function t(locale: Locale | null | undefined) {
 
 function bookingCode(bookingId?: string | null) {
   return bookingId ? `CC-${bookingId.replace(/-/g, '').slice(0, 8).toUpperCase()}` : 'CC-PENDING'
+}
+
+function stepRank(step?: SessionStep | string | null) {
+  const order: SessionStep[] = [
+    'choosing_language',
+    'choosing_category',
+    'choosing_body_type',
+    'choosing_vehicle',
+    'awaiting_start_date',
+    'awaiting_end_date',
+    'awaiting_confirmation',
+    'awaiting_full_name',
+    'awaiting_phone',
+    'awaiting_id_image',
+    'awaiting_license_image',
+    'awaiting_license_back_image',
+    'awaiting_terms_acceptance',
+    'awaiting_payment_proof',
+    'completed',
+  ]
+
+  const index = order.indexOf(step as SessionStep)
+  return index === -1 ? 0 : index
 }
 
 async function restoreSession(chatId: string): Promise<BotSession | null> {
@@ -321,7 +438,10 @@ async function restoreSession(chatId: string): Promise<BotSession | null> {
     if (!(customer?.phone ?? null)) return 'awaiting_phone'
     if (!booking.id_file_id) return 'awaiting_id_image'
     if (!booking.license_file_id) return 'awaiting_license_image'
+    if (!booking.license_back_file_id) return 'awaiting_license_back_image'
     if (booking.status === 'quote_ready') return 'awaiting_confirmation'
+    if (booking.status === 'confirmed_booking') return 'awaiting_terms_acceptance'
+    if (booking.status === 'awaiting_payment_confirmation') return 'awaiting_payment_proof'
     return 'completed'
   })()
 
@@ -335,6 +455,7 @@ async function restoreSession(chatId: string): Promise<BotSession | null> {
     telegram_username: customer?.telegram_username ?? null,
     customer_full_name: customer?.full_name ?? null,
     customer_phone: customer?.phone ?? null,
+    selected_segment: getTelegramSegment(booking.vehicle_name ?? '', selectedCategory),
     selected_category: selectedCategory,
     selected_vehicle_model: booking.vehicle_name ?? null,
     selected_vehicle_display_model: display?.model ?? booking.vehicle_name ?? null,
@@ -345,27 +466,44 @@ async function restoreSession(chatId: string): Promise<BotSession | null> {
     total_amount: booking.total_amount ?? null,
     id_file_id: booking.id_file_id ?? null,
     license_file_id: booking.license_file_id ?? null,
+    license_back_file_id: booking.license_back_file_id ?? null,
     blocked_ranges: blockedRanges,
     updated_at: booking.updated_at,
   }
 }
 
-async function getSession(chatId: string): Promise<BotSession> {
-  const existing = memorySessions.get(chatId)
-  const restored = await restoreSession(chatId)
+async function restorePersistedSession(chatId: string): Promise<BotSession | null> {
+  const record = await getTelegramSession<BotSession>(chatId)
+  const data = record?.session_data
 
-  if (restored) {
-    const existingIsBlank = !existing
-      || (!existing.booking_id && (existing.step === 'choosing_language' || !existing.locale))
-      || (existing.booking_id !== restored.booking_id && (existing.step === 'choosing_language' || !existing.locale))
+  if (!data || data.chat_id !== chatId || !data.step) return null
 
-    if (existingIsBlank) {
-      memorySessions.set(chatId, restored)
-      return restored
-    }
+  const restoredBooking = await restoreSession(chatId)
+
+  if (restoredBooking && stepRank(restoredBooking.step) > stepRank(data.step)) {
+    return restoredBooking
   }
 
+  return {
+    ...defaultSession(chatId),
+    ...(restoredBooking ?? {}),
+    ...data,
+    chat_id: chatId,
+    updated_at: record.updated_at ?? data.updated_at ?? new Date().toISOString(),
+  }
+}
+
+async function getSession(chatId: string): Promise<BotSession> {
+  const existing = memorySessions.get(chatId)
   if (existing) return existing
+
+  const persisted = await restorePersistedSession(chatId)
+  if (persisted) {
+    memorySessions.set(chatId, persisted)
+    return persisted
+  }
+
+  const restored = await restoreSession(chatId)
   if (restored) {
     memorySessions.set(chatId, restored)
     return restored
@@ -382,6 +520,7 @@ async function saveSession(chatId: string, patch: Partial<BotSession>): Promise<
     updated_at: new Date().toISOString(),
   }
   memorySessions.set(chatId, next)
+  await upsertTelegramSession(next)
   return next
 }
 
@@ -392,6 +531,7 @@ async function resetSession(chatId: string, person?: { first_name?: string; last
     step: locale ? 'choosing_category' : 'choosing_language',
     telegram_name: formatTelegramName(person),
     telegram_username: person?.username ?? null,
+    selected_segment: null,
   })
 }
 
@@ -426,6 +566,7 @@ async function persistBooking(session: BotSession, status?: string) {
     totalAmount: session.total_amount ?? null,
     idFileId: session.id_file_id ?? null,
     licenseFileId: session.license_file_id ?? null,
+    licenseBackFileId: session.license_back_file_id ?? null,
     status: status ?? 'draft',
   })
 }
@@ -500,6 +641,24 @@ async function sendPhoto(chatId: string, photo: string, caption: string, buttons
   })
 }
 
+async function sendDocument(chatId: string, document: string, caption: string, buttons?: TelegramInlineButton[][]) {
+  const session = await getSession(chatId)
+  await telegramApi('sendDocument', {
+    chat_id: chatId,
+    document,
+    caption,
+    reply_markup: buttons ? { inline_keyboard: buttons } : undefined,
+  })
+  await logTelegramConversation({
+    chatId,
+    customerId: session.customer_id ?? null,
+    direction: 'outbound',
+    messageType: 'document',
+    body: caption,
+    meta: { document, buttons: buttons ?? null },
+  })
+}
+
 async function answerCallbackQuery(callbackQueryId: string, text?: string) {
   return telegramApi('answerCallbackQuery', {
     callback_query_id: callbackQueryId,
@@ -511,56 +670,114 @@ function formatCurrency(amount: number) {
   return `R ${amount.toLocaleString('en-ZA')}`
 }
 
-function getLanguageButtons() {
+function getLanguageButtons(config: BotControllerConfig = {}) {
   return [[
-    { text: 'View vehicles', callback_data: 'lang:en' },
-    { text: 'Посмотреть автомобили', callback_data: 'lang:ru' },
+    { text: copy(config, 'buttonText', 'languageEnglish', 'View vehicles'), callback_data: 'lang:en' },
+    { text: copy(config, 'buttonText', 'languageRussian', 'Посмотреть автомобили'), callback_data: 'lang:ru' },
   ]]
 }
 
-function getTermsLanguageButtons() {
+function getTermsLanguageButtons(config: BotControllerConfig = {}) {
   return [[
-    { text: 'English', callback_data: 'terms:en' },
-    { text: 'Русский', callback_data: 'terms:ru' },
+    { text: copy(config, 'buttonText', 'termsEnglish', 'English'), callback_data: 'terms:en' },
+    { text: copy(config, 'buttonText', 'termsRussian', 'Русский'), callback_data: 'terms:ru' },
   ]]
 }
 
-function getTermsAcceptButtons(locale: Locale) {
-  return [[{ text: locale === 'ru' ? 'Принять' : 'Accept', callback_data: `terms_accept:${locale}` }]]
+function getManagerButton(locale: Locale, config: BotControllerConfig = {}): TelegramInlineButton[] {
+  return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'managerRu' : 'managerEn', locale === 'ru' ? 'Связаться с менеджером' : 'Speak to manager'), callback_data: 'manager_request' }]
 }
 
-function getPaymentButtons(locale: Locale) {
-  return [[{ text: locale === 'ru' ? 'Оплата наличными' : 'Cash payment', callback_data: `cash_payment:${locale}` }]]
+function getTermsButton(locale: Locale, config: BotControllerConfig = {}): TelegramInlineButton[] {
+  return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'termsRu' : 'termsEn', locale === 'ru' ? 'Условия аренды' : 'Terms and Conditions'), callback_data: 'terms_view' }]
 }
 
-function getCategoryButtons(locale: Locale) {
-  return CATEGORY_ORDER.map((category) => [{ text: CATEGORY_LABELS[locale][category], callback_data: `category:${category}` }])
+function getTermsAcceptButtons(locale: Locale, config: BotControllerConfig = {}) {
+  return [
+    [{ text: copy(config, 'buttonText', locale === 'ru' ? 'acceptRu' : 'acceptEn', locale === 'ru' ? 'Принять' : 'Accept'), callback_data: `terms_accept:${locale}` }],
+    ...customButtonRows(config, 'terms', locale),
+  ]
 }
 
-function vehiclesForCategory(category: VehicleCategory) {
-  return TELEGRAM_CATALOG.filter((vehicle) => vehicle.category === category)
+function getPaymentButtons(locale: Locale, config: BotControllerConfig = {}) {
+  return [
+    [{ text: copy(config, 'buttonText', locale === 'ru' ? 'cashRu' : 'cashEn', locale === 'ru' ? 'Оплата наличными' : 'Cash payment option'), callback_data: `cash_payment:${locale}` }],
+    getManagerButton(locale, config),
+    ...customButtonRows(config, 'payment', locale),
+  ]
+}
+
+function getCategoryButtons(locale: Locale, config: BotControllerConfig = {}) {
+  return [
+    ...SEGMENT_ORDER.map((segment) => [{ text: copy(config, 'buttonText', `${segment}${locale === 'ru' ? 'Ru' : 'En'}`, SEGMENT_LABELS[locale][segment]), callback_data: `category:${segment}` }]),
+    getTermsButton(locale, config),
+    getManagerButton(locale, config),
+    ...customButtonRows(config, 'class', locale),
+  ]
+}
+
+function getPublicSupabaseClient() {
+  if (!PUBLIC_SUPABASE_URL || !PUBLIC_SUPABASE_ANON_KEY) return null
+
+  return createClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+}
+
+async function getPublicVehiclesForCategory(category: VehicleCategory): Promise<VehicleChoice[]> {
+  try {
+    const vehicles = await getVehiclesForCustomerCategory(category)
+
+    return vehicles.map((vehicle) => {
+      const display = getTelegramVehicleDisplay(vehicle.model)
+      const bodyType = vehicle.telegram_body_type && vehicle.telegram_body_type in BODY_TYPE_LABELS.en
+        ? vehicle.telegram_body_type as TelegramBodyType
+        : getTelegramBodyType(vehicle.model)
+
+      return {
+        id: vehicle.id,
+        model: display.model,
+        bookingModel: vehicle.model,
+        category: vehicle.cat as VehicleCategory,
+        bodyType,
+        rate: vehicle.rate,
+        status: vehicle.status,
+        imageUrl: vehicle.image_url || display.imageUrl || '',
+        source: 'db' as const,
+        blockedRanges: vehicle.blockedRanges,
+        isBlocked: vehicle.isBlocked,
+      }
+    }).filter((vehicle) => ['Available', 'Booked'].includes(vehicle.status))
+  } catch (error) {
+    console.error('getPublicVehiclesForCategory exception', { category, error })
+    return []
+  }
+}
+
+async function getLiveVehiclesForSegment(segment: TelegramSegment): Promise<VehicleChoice[]> {
+  const all = (await Promise.all(CATEGORY_ORDER.map((category) => getPublicVehiclesForCategory(category)))).flat()
+
+  return all.filter((vehicle) => getTelegramSegment(vehicle.bookingModel, vehicle.category) === segment)
+}
+
+async function getPublicVehicleById(vehicleId: string): Promise<VehicleChoice | null> {
+  const all = (await Promise.all(CATEGORY_ORDER.map((category) => getPublicVehiclesForCategory(category)))).flat()
+  return all.find((vehicle) => vehicle.id === vehicleId) ?? null
 }
 
 async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static', categoryHint?: VehicleCategory | null): Promise<VehicleChoice | null> {
   if (source === 'db') {
     if (categoryHint) {
-      const vehicles = await getVehiclesForCustomerCategory(categoryHint)
+      const vehicles = await getPublicVehiclesForCategory(categoryHint)
       const matched = vehicles.find((vehicle) => vehicle.id === vehicleId)
       if (matched) {
-        const display = getTelegramVehicleDisplay(matched.model)
-        return {
-          id: matched.id,
-          model: display.model,
-          bookingModel: matched.model,
-          category: matched.cat as VehicleCategory,
-          rate: matched.rate,
-          status: matched.status,
-          imageUrl: matched.image_url || display.imageUrl || '',
-          source: 'db',
-          blockedRanges: matched.blockedRanges,
-          isBlocked: matched.isBlocked,
-        }
+        return matched
       }
+    }
+
+    const publicMatch = await getPublicVehicleById(vehicleId)
+    if (publicMatch) {
+      return publicMatch
     }
 
     const vehicle = await getVehicleById(vehicleId)
@@ -571,6 +788,7 @@ async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static', 
       model: display.model,
       bookingModel: vehicle.model,
       category: vehicle.cat as VehicleCategory,
+      bodyType: (vehicle.telegram_body_type as TelegramBodyType | null) ?? getTelegramBodyType(vehicle.model),
       rate: vehicle.rate,
       status: vehicle.status,
       imageUrl: vehicle.image_url || display.imageUrl || '',
@@ -587,6 +805,7 @@ async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static', 
     model: vehicle.model,
     bookingModel: vehicle.model,
     category: vehicle.category,
+    bodyType: getTelegramBodyType(vehicle.model),
     rate: vehicle.rate,
     status: vehicle.status,
     imageUrl: vehicle.imageUrl,
@@ -601,9 +820,10 @@ function datesOverlap(startA: string, endA: string, startB: string, endB: string
 }
 
 function formatVehicleCaption(vehicle: VehicleChoice, locale: Locale) {
+  const segment = getTelegramSegment(vehicle.bookingModel, vehicle.category)
   return [
     `🚘 ${vehicle.model}`,
-    `${CATEGORY_LABELS[locale][vehicle.category]}`,
+    `${SEGMENT_LABELS[locale][segment]} • ${BODY_TYPE_LABELS[locale][vehicle.bodyType]}`,
     locale === 'ru' ? `Ставка в день: ${formatCurrency(vehicle.rate)}` : `Daily rate: ${formatCurrency(vehicle.rate)}`,
   ].join('\n')
 }
@@ -682,68 +902,83 @@ function buildCalendarKeyboard(
 }
 
 async function sendWelcome(chatId: string) {
+  const config = await getBotControllerConfig()
   await sendMessage(
     chatId,
-    `${TEXT.welcome.en}\n\n\n${TEXT.welcome.ru}`,
-    getLanguageButtons(),
+    `${copy(config, 'customerText', 'welcomeEn', TEXT.welcome.en)}\n\n\n${copy(config, 'customerText', 'welcomeRu', TEXT.welcome.ru)}`,
+    getLanguageButtons(config),
   )
 }
 
-async function sendCategoryPrompt(chatId: string, locale: Locale) {
-  await sendMessage(chatId, `${TEXT.chooseCategory[locale]}`, getCategoryButtons(locale))
+function getBodyTypeButtons(locale: Locale, segment: TelegramSegment, vehicles: VehicleChoice[], config: BotControllerConfig = {}) {
+  const bodyOrder: TelegramBodyType[] = ['SUV', 'Sedan', 'Convertible', 'Coupe', 'Hatchback', 'People Mover', 'Van', 'Minibus']
+  const available = bodyOrder.filter((bodyType) => vehicles.some((vehicle) => vehicle.bodyType === bodyType))
+  return [
+    ...available.map((bodyType) => [{ text: BODY_TYPE_LABELS[locale][bodyType], callback_data: `bodytype:${segment}:${encodeURIComponent(bodyType)}` }]),
+    getManagerButton(locale, config),
+    ...customButtonRows(config, 'size', locale),
+  ]
 }
 
-async function sendCategoryCatalog(chatId: string, category: VehicleCategory, locale: Locale) {
-  const liveVehicles = await getVehiclesForCustomerCategory(category)
-  const vehicles: VehicleChoice[] = (liveVehicles && liveVehicles.length > 0)
-    ? liveVehicles
-      .map((vehicle) => {
-        const display = getTelegramVehicleDisplay(vehicle.model)
-        return {
-          id: vehicle.id,
-          model: display.model,
-          bookingModel: vehicle.model,
-          category: vehicle.cat as VehicleCategory,
-          rate: vehicle.rate,
-          status: vehicle.status,
-          imageUrl: vehicle.image_url || display.imageUrl || '',
-          source: 'db' as const,
-          blockedRanges: vehicle.blockedRanges,
-          isBlocked: vehicle.isBlocked,
-        }
-      })
-      .filter((vehicle) => Boolean(vehicle.imageUrl))
-    : vehiclesForCategory(category)
-      .map((vehicle) => ({
-        id: vehicle.id,
-        model: vehicle.model,
-        bookingModel: vehicle.model,
-        category: vehicle.category,
-        rate: vehicle.rate,
-        status: vehicle.status,
-        imageUrl: vehicle.imageUrl,
-        source: 'static' as const,
-        blockedRanges: [],
-        isBlocked: vehicle.status === 'Booked',
-      }))
+async function sendCategoryPrompt(chatId: string, locale: Locale) {
+  const config = await getBotControllerConfig()
+  await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'chooseCategoryRu' : 'chooseCategoryEn', TEXT.chooseCategory[locale]), getCategoryButtons(locale, config))
+}
 
-  if (vehicles.length === 0) {
-    await sendMessage(chatId, TEXT.noVehicles[locale], getCategoryButtons(locale))
+async function sendBodyTypePrompt(chatId: string, segment: TelegramSegment, locale: Locale) {
+  const config = await getBotControllerConfig()
+  const liveVehicles = await getLiveVehiclesForSegment(segment)
+  if (liveVehicles.length === 0) {
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'noVehiclesRu' : 'noVehiclesEn', TEXT.noVehicles[locale]), getCategoryButtons(locale, config))
     return
   }
 
-  const introRate = liveVehicles && liveVehicles.length > 0 ? null : CATEGORY_PRICING[category]
-  await sendMessage(chatId, TEXT.categoryIntro[locale](category, introRate))
+  await sendMessage(
+    chatId,
+    `${TEXT.categoryIntro[locale](segment)}\n\n${copy(config, 'customerText', locale === 'ru' ? 'chooseBodyTypeRu' : 'chooseBodyTypeEn', TEXT.chooseBodyType[locale])}`,
+    getBodyTypeButtons(locale, segment, liveVehicles, config),
+  )
+}
 
-  for (const vehicle of vehicles) {
-    if (!vehicle.imageUrl) continue
+async function sendCategoryCatalog(chatId: string, segment: TelegramSegment, bodyType: TelegramBodyType, locale: Locale) {
+  const config = await getBotControllerConfig()
+  const liveVehicles = await getLiveVehiclesForSegment(segment)
+  if (liveVehicles.length === 0) {
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'noVehiclesRu' : 'noVehiclesEn', TEXT.noVehicles[locale]), getCategoryButtons(locale, config))
+    return
+  }
+
+  const grouped = new Map<TelegramBodyType, VehicleChoice[]>()
+
+  for (const vehicle of liveVehicles) {
+    const currentBodyType = vehicle.bodyType
+    grouped.set(currentBodyType, [...(grouped.get(currentBodyType) ?? []), vehicle])
+  }
+
+  const group = grouped.get(bodyType)
+  if (!group || group.length === 0) {
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'noVehiclesRu' : 'noVehiclesEn', TEXT.noVehicles[locale]), getBodyTypeButtons(locale, segment, liveVehicles, config))
+    return
+  }
+
+  await sendMessage(chatId, `• ${BODY_TYPE_LABELS[locale][bodyType]}`)
+
+  for (const vehicle of group) {
     try {
-      await sendPhoto(
-        chatId,
-        vehicle.imageUrl,
-        formatVehicleCaption(vehicle, locale),
-        [[{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }]],
-      )
+      if (vehicle.imageUrl) {
+        await sendPhoto(
+          chatId,
+          vehicle.imageUrl,
+          formatVehicleCaption(vehicle, locale),
+          [[{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }]],
+        )
+      } else {
+        await sendMessage(
+          chatId,
+          formatVehicleCaption(vehicle, locale),
+          [[{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }]],
+        )
+      }
     } catch (error) {
       console.error('sendPhoto failed for vehicle', vehicle.id, error)
       await sendMessage(
@@ -773,32 +1008,35 @@ async function logInboundText(chatId: string, body: string, type: 'text' | 'butt
   })
 }
 
-async function handleCategorySelect(callback: CallbackQuery, category: VehicleCategory) {
+async function handleCategorySelect(callback: CallbackQuery, category: TelegramSegment) {
   const chatId = String(callback.message?.chat.id ?? '')
   if (!chatId) return
 
   const session = await getSession(chatId)
   const locale = t(session.locale)
-  await logInboundText(chatId, `Selected category: ${category}`, 'button')
+  await logInboundText(chatId, `Selected segment: ${category}`, 'button')
 
   await saveSession(chatId, {
-    step: 'choosing_vehicle',
-    selected_category: category,
+    step: 'choosing_body_type',
+    selected_segment: category,
+    selected_category: null,
+    selected_body_type: null,
     selected_vehicle_id: null,
     selected_vehicle_model: null,
     selected_vehicle_display_model: null,
-    daily_rate: CATEGORY_PRICING[category],
+    daily_rate: null,
     requested_start_date: null,
     requested_days: null,
     requested_end_date: null,
     total_amount: null,
     id_file_id: null,
     license_file_id: null,
+    license_back_file_id: null,
     blocked_ranges: [],
   })
 
-  await answerCallbackQuery(callback.id, CATEGORY_LABELS[locale][category])
-  await sendCategoryCatalog(chatId, category, locale)
+  await answerCallbackQuery(callback.id, SEGMENT_LABELS[locale][category])
+  await sendBodyTypePrompt(chatId, category, locale)
 }
 
 async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string, source: 'db' | 'static') {
@@ -822,6 +1060,7 @@ async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string, s
     step: 'awaiting_start_date',
     telegram_name: formatTelegramName(callback.from),
     telegram_username: callback.from?.username ?? null,
+    selected_segment: getTelegramSegment(vehicle.bookingModel, vehicle.category),
     selected_category: vehicle.category,
     selected_vehicle_id: vehicle.id,
     selected_vehicle_model: vehicle.bookingModel,
@@ -835,6 +1074,7 @@ async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string, s
     customer_phone: null,
     id_file_id: null,
     license_file_id: null,
+    license_back_file_id: null,
     blocked_ranges: vehicle.blockedRanges,
   })
 
@@ -853,9 +1093,12 @@ async function handleCallback(callback: CallbackQuery) {
   const chatId = String(callback.message?.chat.id ?? '')
   if (!chatId) return
 
+  let session = await getSession(chatId)
+  let locale: Locale = t(session.locale)
+
   if (data.startsWith('lang:')) {
-    const locale = data.replace('lang:', '') as Locale
-    let session = await resetSession(chatId, callback.from, locale)
+    locale = data.replace('lang:', '') as Locale
+    session = await resetSession(chatId, callback.from, locale)
     session = (await ensureCustomer(session)) ?? session
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Русский' : 'English')
     await sendCategoryPrompt(chatId, locale)
@@ -863,31 +1106,92 @@ async function handleCallback(callback: CallbackQuery) {
   }
 
   if (data.startsWith('terms:')) {
-    const locale = data.replace('terms:', '') as Locale
-    await saveSession(chatId, { locale })
+    locale = data.replace('terms:', '') as Locale
+    const config = await getBotControllerConfig()
+    session = await saveSession(chatId, { locale, step: 'awaiting_terms_acceptance' })
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Условия аренды' : 'Rental terms')
-    await sendMessage(chatId, TEXT.termsShort[locale], getTermsAcceptButtons(locale))
+    await sendDocument(
+      chatId,
+      `${publicBaseUrl()}/telegram-terms/cape-cars-rental-terms-${locale}.pdf`,
+      copy(config, 'customerText', locale === 'ru' ? 'termsDocumentCaptionRu' : 'termsDocumentCaptionEn', TEXT.termsDocumentCaption[locale]),
+      getTermsAcceptButtons(locale, config),
+    )
+    return
+  }
+
+  if (data === 'terms_view') {
+    const config = await getBotControllerConfig()
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Условия аренды' : 'Terms and Conditions')
+    await sendDocument(
+      chatId,
+      `${publicBaseUrl()}/telegram-terms/cape-cars-rental-terms-${locale}.pdf`,
+      copy(config, 'customerText', locale === 'ru' ? 'termsDocumentViewCaptionRu' : 'termsDocumentViewCaptionEn', TEXT.termsDocumentViewCaption[locale]),
+      getCategoryButtons(locale, config),
+    )
     return
   }
 
   if (data.startsWith('terms_accept:')) {
-    const locale = data.replace('terms_accept:', '') as Locale
-    await saveSession(chatId, { locale })
+    locale = data.replace('terms_accept:', '') as Locale
+    const config = await getBotControllerConfig()
+    const next = await saveSession(chatId, { locale, step: 'awaiting_payment_proof' })
+    await persistBooking(next, 'awaiting_payment_confirmation')
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Принято' : 'Accepted')
-    await sendMessage(chatId, TEXT.paymentDetails[locale], getPaymentButtons(locale))
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'paymentDetailsRu' : 'paymentDetailsEn', TEXT.paymentDetails[locale](next.total_amount)), getPaymentButtons(locale, config))
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'paymentProofRu' : 'paymentProofEn', TEXT.paymentProof[locale]))
     return
   }
 
   if (data.startsWith('cash_payment:')) {
-    const locale = data.replace('cash_payment:', '') as Locale
-    await saveSession(chatId, { locale })
-    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Оплата наличными' : 'Cash payment')
-    await sendMessage(chatId, TEXT.cashPayment[locale])
+    locale = data.replace('cash_payment:', '') as Locale
+    const config = await getBotControllerConfig()
+    const next = await saveSession(chatId, { locale, step: 'completed' })
+    await persistBooking(next, 'confirmed_booking')
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Оплата наличными' : 'Cash payment option')
+    try {
+      await notifyAdminCashPayment({
+        bookingId: next.booking_id ?? '',
+        chatId,
+      })
+    } catch (error) {
+      console.error('notifyAdminCashPayment failed', error)
+    }
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'cashPaymentRu' : 'cashPaymentEn', TEXT.cashPayment[locale]))
+    return
+  }
+
+  if (data === 'manager_request') {
+    const config = await getBotControllerConfig()
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Менеджер уведомлён' : 'Manager notified')
+    await notifyAdminManagerRequest({
+      chatId,
+      locale,
+      telegramName: session.telegram_name ?? formatTelegramName(callback.from),
+      username: callback.from?.username ?? session.telegram_username ?? null,
+      customerName: session.customer_full_name ?? null,
+      phone: session.customer_phone ?? null,
+    })
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'managerRequestedRu' : 'managerRequestedEn', TEXT.managerRequested[locale]), getCategoryButtons(locale, config))
     return
   }
 
   if (data.startsWith('category:')) {
-    await handleCategorySelect(callback, data.replace('category:', '') as VehicleCategory)
+    await handleCategorySelect(callback, data.replace('category:', '') as TelegramSegment)
+    return
+  }
+
+  if (data.startsWith('bodytype:')) {
+    const [segment, rawBodyType] = data.replace('bodytype:', '').split(':')
+    if (!segment || !rawBodyType) {
+      await answerCallbackQuery(callback.id, locale === 'ru' ? 'Категория недоступна' : 'Category unavailable')
+      await sendCategoryPrompt(chatId, locale)
+      return
+    }
+    const bodyType = decodeURIComponent(rawBodyType) as TelegramBodyType
+    await logInboundText(chatId, `Selected body type: ${bodyType}`, 'button')
+    await saveSession(chatId, { step: 'choosing_vehicle', selected_segment: segment as TelegramSegment, selected_body_type: bodyType })
+    await answerCallbackQuery(callback.id, BODY_TYPE_LABELS[locale][bodyType])
+    await sendCategoryCatalog(chatId, segment as TelegramSegment, bodyType, locale)
     return
   }
 
@@ -998,15 +1302,16 @@ async function handleCallback(callback: CallbackQuery) {
     return
   }
 
-  const session = await getSession(chatId)
-  const locale = t(session.locale)
+  session = await getSession(chatId)
+  locale = t(session.locale)
 
   if (data === 'confirm_booking') {
+    const config = await getBotControllerConfig()
     await logInboundText(chatId, 'Confirmed booking', 'button')
     const next = await saveSession(chatId, { step: 'awaiting_full_name' })
     await persistBooking(next, 'customer_details_pending')
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Подтверждено' : 'Confirmed')
-    await sendMessage(chatId, TEXT.fullName[locale])
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'fullNameRu' : 'fullNameEn', TEXT.fullName[locale]))
     return
   }
 
@@ -1038,12 +1343,15 @@ async function handleCallback(callback: CallbackQuery) {
       selected_vehicle_id: null,
       selected_vehicle_model: null,
       selected_vehicle_display_model: null,
+      selected_segment: null,
       selected_category: null,
+      selected_body_type: null,
       daily_rate: null,
       customer_full_name: null,
       customer_phone: null,
       id_file_id: null,
       license_file_id: null,
+      license_back_file_id: null,
       blocked_ranges: [],
     })
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Другие автомобили' : 'Other vehicles')
@@ -1086,6 +1394,15 @@ async function handleMessage(message: TelegramMessage) {
 
   if (session.step === 'choosing_category') {
     await sendCategoryPrompt(chatId, locale)
+    return
+  }
+
+  if (session.step === 'choosing_body_type') {
+    if (session.selected_segment) {
+      await sendBodyTypePrompt(chatId, session.selected_segment, locale)
+    } else {
+      await sendCategoryPrompt(chatId, locale)
+    }
     return
   }
 
@@ -1186,11 +1503,34 @@ async function handleMessage(message: TelegramMessage) {
       customerId: session.customer_id ?? null,
       direction: 'inbound',
       messageType: 'photo',
-      body: 'Driver license image uploaded',
+      body: 'Driver license front image uploaded',
       meta: { fileId },
     })
 
-    session = await saveSession(chatId, { step: 'completed', license_file_id: fileId })
+    session = await saveSession(chatId, { step: 'awaiting_license_back_image', license_file_id: fileId })
+    session = (await ensureCustomer(session)) ?? session
+    await persistBooking(session, 'documents_pending')
+    await sendMessage(chatId, TEXT.licenseBack[locale])
+    return
+  }
+
+  if (session.step === 'awaiting_license_back_image') {
+    const fileId = extractFileId(message)
+    if (!fileId) {
+      await sendMessage(chatId, TEXT.licenseBack[locale])
+      return
+    }
+
+    await logTelegramConversation({
+      chatId,
+      customerId: session.customer_id ?? null,
+      direction: 'inbound',
+      messageType: 'photo',
+      body: 'Driver license back image uploaded',
+      meta: { fileId },
+    })
+
+    session = await saveSession(chatId, { step: 'completed', license_back_file_id: fileId })
     session = (await ensureCustomer(session)) ?? session
     await persistBooking(session, 'pending')
 
@@ -1208,7 +1548,8 @@ async function handleMessage(message: TelegramMessage) {
         totalDays: session.requested_days ?? null,
         totalAmount: session.total_amount ?? null,
         idFileId: session.id_file_id ?? null,
-        licenseFileId: fileId ?? null,
+        licenseFileId: session.license_file_id ?? null,
+        licenseBackFileId: fileId ?? null,
       })
     } catch (error) {
       console.error('notifyAdminNewBooking failed', error)
@@ -1218,12 +1559,65 @@ async function handleMessage(message: TelegramMessage) {
     return
   }
 
-  session = await resetSession(chatId, message.from, session.locale)
-  session = (await ensureCustomer(session)) ?? session
-  await sendCategoryPrompt(chatId, t(session.locale))
+  if (session.step === 'awaiting_terms_acceptance') {
+    const config = await getBotControllerConfig()
+    await sendMessage(
+      chatId,
+      copy(config, 'customerText', locale === 'ru' ? 'termsAcceptanceReminderRu' : 'termsAcceptanceReminderEn', TEXT.termsAcceptanceReminder[locale]),
+      getTermsAcceptButtons(locale, config),
+    )
+    return
+  }
+
+  if (session.step === 'awaiting_payment_proof') {
+    const fileId = extractFileId(message)
+    if (!fileId) {
+      await sendMessage(chatId, TEXT.paymentProof[locale])
+      return
+    }
+
+    await logTelegramConversation({
+      chatId,
+      customerId: session.customer_id ?? null,
+      direction: 'inbound',
+      messageType: 'photo',
+      body: 'Payment proof uploaded',
+      meta: { fileId, kind: 'payment_proof' },
+    })
+
+    const next = await saveSession(chatId, { step: 'completed' })
+    await persistBooking(next, 'awaiting_payment_confirmation')
+    try {
+      await notifyAdminPaymentProof({
+        bookingId: next.booking_id ?? '',
+        chatId,
+        paymentProofFileId: fileId,
+      })
+    } catch (error) {
+      console.error('notifyAdminPaymentProof failed', error)
+    }
+    await sendMessage(chatId, TEXT.paymentProofReceived[locale])
+    return
+  }
+
+  await sendMessage(
+    chatId,
+    locale === 'ru'
+      ? 'Я сохранил ваше бронирование. Пожалуйста, используйте кнопки выше или отправьте /start, чтобы начать заново.'
+      : 'I still have your booking saved. Please use the buttons above, or send /start if you want to begin again.',
+  )
 }
 
 export async function processTelegramUpdate(update: TelegramUpdate) {
+  const config = await getBotControllerConfig()
+
+  if (config.botEnabled === false) {
+    if (update.callback_query) {
+      await answerCallbackQuery(update.callback_query.id, 'Bot is currently off')
+    }
+    return
+  }
+
   if (update.callback_query) {
     await handleCallback(update.callback_query)
     return

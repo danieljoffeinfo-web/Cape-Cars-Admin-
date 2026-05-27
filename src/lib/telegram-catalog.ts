@@ -1,4 +1,6 @@
 export type VehicleCategory = 'Luxury Vehicles' | 'Mid Tier Vehicles' | 'Large Vehicles'
+export type TelegramSegment = 'luxury' | 'mid' | 'economy'
+export type TelegramBodyType = 'SUV' | 'Sedan' | 'Convertible' | 'Coupe' | 'Hatchback' | 'Van' | 'Minibus' | 'People Mover'
 
 export type TelegramCatalogVehicle = {
   id: string
@@ -307,6 +309,28 @@ export function getTelegramVehicleDisplay(model: string) {
     model,
     imageUrl: TELEGRAM_CATALOG_IMAGE_BY_MODEL[model] ?? '',
   }
+}
+
+export function getTelegramSegment(model: string, category?: VehicleCategory | string | null): TelegramSegment {
+  const normalized = model.toLowerCase()
+
+  if (category === 'Luxury Vehicles') return 'luxury'
+  if (/(picanto|jazz|i20)/.test(normalized)) return 'economy'
+  return 'mid'
+}
+
+export function getTelegramBodyType(model: string): TelegramBodyType {
+  const normalized = model.toLowerCase()
+
+  if (/(sprinter|minibus)/.test(normalized)) return 'Minibus'
+  if (/(staria|grand starex|v-class)/.test(normalized)) return 'People Mover'
+  if (/(van)/.test(normalized)) return 'Van'
+  if (/(convertible|boxster|cabriolet)/.test(normalized)) return 'Convertible'
+  if (/(cayman|coupe|competition)/.test(normalized)) return 'Coupe'
+  if (/(sedan|s-class|3 series)/.test(normalized)) return 'Sedan'
+  if (/(x3|x5|wrangler|range rover|rav4|evoque|countryman|sportback|suv)/.test(normalized)) return 'SUV'
+  if (/(picanto|jazz|i20)/.test(normalized)) return 'Hatchback'
+  return 'Sedan'
 }
 
 export function getInternalTelegramVehicleModel(displayModel: string, category?: string | null) {

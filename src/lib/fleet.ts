@@ -1,6 +1,7 @@
 import { createClient } from './supabase/client'
 
 export type VehicleCategory = 'Luxury Vehicles' | 'Mid Tier Vehicles' | 'Large Vehicles'
+export type VehicleBodyType = 'SUV' | 'Sedan' | 'Convertible' | 'Coupe' | 'Hatchback' | 'Van' | 'Minibus' | 'People Mover'
 
 export type Car = {
   id: number
@@ -27,6 +28,14 @@ export type Vehicle = {
   description: string | null
   image_url: string | null
   sort_order: number
+  telegram_body_type?: VehicleBodyType | null
+  blockedRanges?: Array<{
+    startDate: string
+    endDate: string
+    source: 'telegram' | 'rental'
+    status: string
+  }>
+  isBlocked?: boolean
 }
 
 export const FLEET: Car[] = []

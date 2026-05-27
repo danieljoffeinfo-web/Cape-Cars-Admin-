@@ -3,16 +3,20 @@ import {
   getAdminSubscriberChatIds,
   getTelegramBookingById,
   getTelegramBookingsForRange,
+  getTelegramBotSettings,
+  getTelegramSession,
   getVehicleById,
   hasTelegramConversationMarker,
   logTelegramConversation,
   getVehiclesForCategory,
   openVehicleForBooking,
   pendingHoldExpiresAt,
+  publicBaseUrl,
   registerAdminSubscriber,
   syncTelegramBookingToRental,
   updateAllVehicleRatesByPercent,
   updateTelegramBookingStatus,
+  upsertTelegramSession,
   updateVehicleRate,
   type TelegramBookingWithCustomer,
 } from '@/lib/telegram-admin'
@@ -51,6 +55,15 @@ export type TelegramUpdate = {
 }
 
 type InlineButton = { text: string; callback_data?: string; url?: string }
+type CustomerLocale = 'en' | 'ru'
+type CustomerSessionData = {
+  chat_id: string
+  step: string
+  locale?: CustomerLocale | null
+  booking_id?: string | null
+  customer_id?: string | null
+  total_amount?: number | null
+}
 
 type VehicleAction = 'open' | 'close'
 
@@ -61,6 +74,8 @@ type AdminSession = {
   selectedVehicleId?: string | null
   vehicleAction?: VehicleAction | null
 }
+
+type BotSettings = Awaited<ReturnType<typeof getTelegramBotSettings>>
 
 const sessions = new Map<string, AdminSession>()
 
@@ -110,6 +125,15 @@ async function customerTelegramApi(method: string, payload: Record<string, unkno
   }
 
   return response.json()
+}
+
+async function customerSendDocument(chatId: string, document: string, caption: string, buttons?: InlineButton[][]) {
+  return customerTelegramApi('sendDocument', {
+    chat_id: chatId,
+    document,
+    caption,
+    reply_markup: buttons ? { inline_keyboard: buttons } : undefined,
+  })
 }
 
 async function sendMessage(chatId: string, text: string, buttons?: InlineButton[][]) {
@@ -188,6 +212,20 @@ function menuButtons(): InlineButton[][] {
     [{ text: 'Vehicle manager', callback_data: 'admin:vehicle_manager' }],
     [{ text: 'Pricing change', callback_data: 'admin:pricing_change' }],
     [{ text: 'View all bookings', callback_data: 'admin:view_bookings' }],
+  ]
+}
+
+function settingsCopy(settings: BotSettings, key: string, fallback: string) {
+  const value = settings.adminText?.[key] ?? settings.buttonText?.[key]
+  return typeof value === 'string' && value.trim() ? value : fallback
+}
+
+async function liveMenuButtons(): Promise<InlineButton[][]> {
+  const settings = await getTelegramBotSettings()
+  return [
+    [{ text: settingsCopy(settings, 'vehicleManager', 'Vehicle manager'), callback_data: 'admin:vehicle_manager' }],
+    [{ text: settingsCopy(settings, 'pricingChange', 'Pricing change'), callback_data: 'admin:pricing_change' }],
+    [{ text: settingsCopy(settings, 'viewBookings', 'View all bookings'), callback_data: 'admin:view_bookings' }],
   ]
 }
 
@@ -318,23 +356,46 @@ function customerShape(booking: TelegramBookingWithCustomer) {
 }
 
 async function sendMainMenu(chatId: string, text = 'Cape Cars admin bot is ready. Choose what you want to manage.') {
+  const settings = await getTelegramBotSettings()
   saveSession(chatId, { step: 'home', selectedCategory: null, selectedVehicleId: null, vehicleAction: null })
-  await sendMessage(chatId, text, menuButtons())
+  await sendMessage(chatId, settingsCopy(settings, 'mainMenu', text), await liveMenuButtons())
 }
 
-async function sendCustomerBookingConfirmed(chatId: string) {
-  await customerTelegramApi('sendMessage', {
-    chat_id: chatId,
-    text: '✅ Booking confirmed. / ✅ Бронирование подтверждено.\n\nChoose your language / Выберите язык',
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: 'English', callback_data: 'terms:en' },
-          { text: 'Русский', callback_data: 'terms:ru' },
-        ],
-      ],
-    },
+function customerLocale(value?: string | null): CustomerLocale {
+  return value === 'ru' ? 'ru' : 'en'
+}
+
+function termsCaption(locale: CustomerLocale) {
+  return locale === 'ru'
+    ? '✅ Бронирование подтверждено.\n\nУсловия аренды Cape Cars прикреплены PDF-файлом. Прочитайте документ и нажмите «Принять», чтобы получить реквизиты для оплаты.'
+    : '✅ Booking confirmed.\n\nCape Cars rental terms are attached as a PDF. Read the document, then tap Accept to receive the payment details.'
+}
+
+function termsAcceptButtons(locale: CustomerLocale): InlineButton[][] {
+  return [[{ text: locale === 'ru' ? 'Принять' : 'Accept', callback_data: `terms_accept:${locale}` }]]
+}
+
+async function sendCustomerBookingConfirmed(booking: TelegramBookingWithCustomer) {
+  const persisted = await getTelegramSession<CustomerSessionData>(booking.chat_id)
+  const previousSession = persisted?.session_data ?? null
+  const locale = customerLocale(previousSession?.locale)
+
+  await upsertTelegramSession({
+    ...(previousSession ?? {}),
+    chat_id: booking.chat_id,
+    step: 'awaiting_terms_acceptance',
+    locale,
+    booking_id: booking.id,
+    customer_id: booking.customer_id,
+    total_amount: booking.total_amount ?? previousSession?.total_amount ?? null,
   })
+
+  await customerSendDocument(
+    booking.chat_id,
+    `${publicBaseUrl()}/telegram-terms/cape-cars-rental-terms-${locale}.pdf`,
+    termsCaption(locale),
+    termsAcceptButtons(locale),
+  )
 }
 
 function customerChatUrl(chatId: string, username?: string | null) {
@@ -344,14 +405,23 @@ function customerChatUrl(chatId: string, username?: string | null) {
 
 function bookingActionButtons(booking: TelegramBookingWithCustomer) {
   const customer = customerShape(booking)
-  return [
-    [{ text: 'Collect Payment', url: customerChatUrl(booking.chat_id, customer?.telegram_username || null) }],
-    [{ text: 'Confirm Booking', callback_data: `admin:booking_confirm:${booking.id}` }],
-    [{ text: 'Payment Collected', callback_data: `admin:booking_paid:${booking.id}` }],
+  const rows: InlineButton[][] = [
+    [{ text: 'Speak to Customer', url: customerChatUrl(booking.chat_id, customer?.telegram_username || null) }],
   ]
+
+  if (['draft', 'quote_ready', 'customer_details_pending', 'documents_pending', 'pending'].includes(booking.status)) {
+    rows.push([{ text: 'Confirmed Booking', callback_data: `admin:booking_confirm:${booking.id}` }])
+  }
+
+  return rows
 }
 
-async function sendBookingSummary(chatId: string, booking: TelegramBookingWithCustomer, heading = 'New booking') {
+async function sendBookingSummary(
+  chatId: string,
+  booking: TelegramBookingWithCustomer,
+  heading = 'New booking',
+  options?: { includeDocuments?: boolean },
+) {
   const customer = customerShape(booking)
   const customerName = customer?.full_name || customer?.telegram_name || booking.chat_id
   const holdUntil = pendingHoldExpiresAt(booking.created_at)
@@ -373,8 +443,11 @@ async function sendBookingSummary(chatId: string, booking: TelegramBookingWithCu
 
   await sendMessage(chatId, summary, bookingActionButtons(booking))
 
-  await sendPhotoBestEffort(chatId, booking.id_file_id ?? null, `Passport / ID — ${customerName}`)
-  await sendPhotoBestEffort(chatId, booking.license_file_id ?? null, `Driver’s license — ${customerName}`)
+  if (options?.includeDocuments) {
+    await sendPhotoBestEffort(chatId, booking.id_file_id ?? null, `Passport / ID — ${customerName}`)
+    await sendPhotoBestEffort(chatId, booking.license_file_id ?? null, `Driver’s license front — ${customerName}`)
+    await sendPhotoBestEffort(chatId, booking.license_back_file_id ?? null, `Driver’s license back — ${customerName}`)
+  }
 }
 
 async function handleBookingAction(chatId: string, callbackId: string, bookingId: string, action: 'confirm' | 'paid') {
@@ -386,12 +459,13 @@ async function handleBookingAction(chatId: string, callbackId: string, bookingId
   }
 
   if (action === 'confirm') {
-    if (['confirmed_booking', 'confirmed', 'payment_collected'].includes(booking.status)) {
+    if (['confirmed_booking', 'awaiting_payment_confirmation', 'confirmed', 'payment_collected'].includes(booking.status)) {
       await answerCallbackQuery(callbackId, 'Booking already confirmed')
       await sendBookingSummary(chatId, booking, 'Booking already confirmed')
       return
     }
 
+    const previousStatus = booking.status
     const updated = await updateTelegramBookingStatus(bookingId, 'confirmed_booking')
     if (!updated) {
       await answerCallbackQuery(callbackId, 'Could not confirm booking')
@@ -400,13 +474,14 @@ async function handleBookingAction(chatId: string, callbackId: string, bookingId
 
     const rentalSync = await syncTelegramBookingToRental(bookingId)
     if (!rentalSync.ok) {
+      await updateTelegramBookingStatus(bookingId, previousStatus)
       await answerCallbackQuery(callbackId, 'Booking saved, website sync failed')
-      await sendMessage(chatId, `Booking status changed, but website booking sync failed: ${rentalSync.error}`)
+      await sendMessage(chatId, `Booking confirmation was rolled back because website rental sync failed: ${rentalSync.error}`)
       return
     }
 
     try {
-      await sendCustomerBookingConfirmed(updated.chat_id)
+      await sendCustomerBookingConfirmed(updated)
     } catch (error) {
       console.error('sendCustomerBookingConfirmed failed', error)
     }
@@ -416,14 +491,22 @@ async function handleBookingAction(chatId: string, callbackId: string, bookingId
     return
   }
 
+  const previousStatus = booking.status
   const updated = await updateTelegramBookingStatus(bookingId, 'confirmed')
-  await answerCallbackQuery(callbackId, 'Payment collected')
+  await answerCallbackQuery(callbackId, 'Payment received')
   if (!updated) {
     await sendMessage(chatId, 'Payment was marked collected but the booking record did not update cleanly.')
     return
   }
 
-  await sendBookingSummary(chatId, updated, 'Payment collected')
+  const rentalSync = await syncTelegramBookingToRental(bookingId)
+  if (!rentalSync.ok) {
+    await updateTelegramBookingStatus(bookingId, previousStatus)
+    await sendMessage(chatId, `Payment status was rolled back because website rental sync failed: ${rentalSync.error}`)
+    return
+  }
+
+  await sendBookingSummary(chatId, updated, 'Payment received')
 }
 
 async function handleCallback(callback: CallbackQuery) {
@@ -666,6 +749,45 @@ export async function processTelegramAdminUpdate(update: TelegramUpdate) {
   }
 }
 
+export async function notifyAdminManagerRequest(input: {
+  chatId: string
+  locale: 'en' | 'ru'
+  telegramName?: string | null
+  username?: string | null
+  customerName?: string | null
+  phone?: string | null
+}) {
+  const adminChatIds = await getAdminSubscriberChatIds()
+  if (adminChatIds.length === 0) return
+
+  const marker = `ADMIN_MANAGER_REQUEST_SENT:${input.chatId}`
+  const alreadySent = await hasTelegramConversationMarker(input.chatId, marker)
+  if (alreadySent) return
+
+  const customerLabel = input.customerName || input.telegramName || input.chatId
+  const summary = [
+    'Manager request',
+    '',
+    `Customer: ${customerLabel}`,
+    `Phone: ${input.phone || 'No phone yet'}`,
+    `Telegram username: ${input.username ? `@${input.username}` : 'No username'}`,
+    `Customer Telegram ID: ${input.chatId}`,
+    `Language: ${input.locale === 'ru' ? 'Russian' : 'English'}`,
+  ].join('\n')
+
+  await Promise.all(adminChatIds.map((adminChatId) => sendMessage(adminChatId, summary, [
+    [{ text: 'Speak to Customer', url: customerChatUrl(input.chatId, input.username || null) }],
+  ])))
+
+  await logTelegramConversation({
+    chatId: input.chatId,
+    direction: 'outbound',
+    messageType: 'text',
+    body: marker,
+    meta: { adminChatIds, locale: input.locale },
+  })
+}
+
 export async function notifyAdminNewBooking(input: {
   bookingId: string
   chatId: string
@@ -680,6 +802,7 @@ export async function notifyAdminNewBooking(input: {
   totalAmount?: number | null
   idFileId?: string | null
   licenseFileId?: string | null
+  licenseBackFileId?: string | null
 }) {
   const adminChatIds = await getAdminSubscriberChatIds()
   if (adminChatIds.length === 0) return
@@ -690,7 +813,7 @@ export async function notifyAdminNewBooking(input: {
 
   const booking = await getTelegramBookingById(input.bookingId)
   if (booking) {
-    await Promise.all(adminChatIds.map((adminChatId) => sendBookingSummary(adminChatId, booking, 'New booking')))
+    await Promise.all(adminChatIds.map((adminChatId) => sendBookingSummary(adminChatId, booking, 'New booking', { includeDocuments: true })))
     await logTelegramConversation({
       chatId: input.chatId,
       direction: 'outbound',
@@ -718,13 +841,110 @@ export async function notifyAdminNewBooking(input: {
 
   await Promise.all(adminChatIds.map(async (adminChatId) => {
     await sendMessage(adminChatId, summary, [
-      [{ text: 'Collect Payment', url: customerChatUrl(input.chatId, input.username || null) }],
-      [{ text: 'Confirm Booking', callback_data: `admin:booking_confirm:${input.bookingId}` }],
-      [{ text: 'Payment Collected', callback_data: `admin:booking_paid:${input.bookingId}` }],
+      [{ text: 'Speak to Customer', url: customerChatUrl(input.chatId, input.username || null) }],
+      [{ text: 'Confirmed Booking', callback_data: `admin:booking_confirm:${input.bookingId}` }],
     ])
     await sendPhotoBestEffort(adminChatId, input.idFileId ?? null, `Passport / ID — ${input.customerName || 'Customer'}`)
-    await sendPhotoBestEffort(adminChatId, input.licenseFileId ?? null, `Driver’s license — ${input.customerName || 'Customer'}`)
+    await sendPhotoBestEffort(adminChatId, input.licenseFileId ?? null, `Driver’s license front — ${input.customerName || 'Customer'}`)
+    await sendPhotoBestEffort(adminChatId, input.licenseBackFileId ?? null, `Driver’s license back — ${input.customerName || 'Customer'}`)
   }))
+
+  await logTelegramConversation({
+    chatId: input.chatId,
+    direction: 'outbound',
+    messageType: 'text',
+    body: marker,
+    meta: { bookingId: input.bookingId, adminChatIds },
+  })
+}
+
+export async function notifyAdminPaymentProof(input: {
+  bookingId: string
+  chatId: string
+  paymentProofFileId?: string | null
+}) {
+  if (!input.bookingId) return
+  const adminChatIds = await getAdminSubscriberChatIds()
+  if (adminChatIds.length === 0) return
+
+  const marker = `ADMIN_PAYMENT_PROOF_SENT:${input.bookingId}`
+  const alreadySent = await hasTelegramConversationMarker(input.chatId, marker)
+  if (alreadySent) return
+
+  const booking = await getTelegramBookingById(input.bookingId)
+  const customer = booking ? customerShape(booking) : null
+  const summary = booking
+    ? [
+      'Payment proof received',
+      '',
+      `Code: ${bookingCode(booking.id)}`,
+      `Customer: ${customer?.full_name || customer?.telegram_name || booking.chat_id}`,
+      `Phone: ${customer?.phone || 'No phone yet'}`,
+      `Vehicle: ${booking.vehicle_name || 'Vehicle pending'}`,
+      `Dates: ${booking.start_date || 'No start date'} → ${booking.end_date || 'No end date'}`,
+      `Total: ${booking.total_amount ? money(booking.total_amount) : 'No total yet'}`,
+      `Status: ${booking.status}`,
+    ].join('\n')
+    : [
+      'Payment proof received',
+      '',
+      `Code: ${bookingCode(input.bookingId)}`,
+      `Customer Telegram ID: ${input.chatId}`,
+    ].join('\n')
+
+  await Promise.all(adminChatIds.map(async (adminChatId) => {
+    await sendMessage(adminChatId, summary, [
+      [{ text: 'Speak to Customer', url: customerChatUrl(input.chatId, customer?.telegram_username || null) }],
+      [{ text: 'Payment received', callback_data: `admin:booking_paid:${input.bookingId}` }],
+    ])
+    await sendPhotoBestEffort(adminChatId, input.paymentProofFileId ?? null, `Payment proof — ${booking ? bookingCode(booking.id) : input.chatId}`)
+  }))
+
+  await logTelegramConversation({
+    chatId: input.chatId,
+    direction: 'outbound',
+    messageType: 'text',
+    body: marker,
+    meta: { bookingId: input.bookingId, adminChatIds },
+  })
+}
+
+export async function notifyAdminCashPayment(input: {
+  bookingId: string
+  chatId: string
+}) {
+  if (!input.bookingId) return
+  const adminChatIds = await getAdminSubscriberChatIds()
+  if (adminChatIds.length === 0) return
+
+  const marker = `ADMIN_CASH_PAYMENT_SENT:${input.bookingId}`
+  const alreadySent = await hasTelegramConversationMarker(input.chatId, marker)
+  if (alreadySent) return
+
+  const booking = await getTelegramBookingById(input.bookingId)
+  const customer = booking ? customerShape(booking) : null
+  const summary = booking
+    ? [
+      'Cash payment selected',
+      '',
+      `Code: ${bookingCode(booking.id)}`,
+      `Customer: ${customer?.full_name || customer?.telegram_name || booking.chat_id}`,
+      `Phone: ${customer?.phone || 'No phone yet'}`,
+      `Vehicle: ${booking.vehicle_name || 'Vehicle pending'}`,
+      `Dates: ${booking.start_date || 'No start date'} → ${booking.end_date || 'No end date'}`,
+      `Total: ${booking.total_amount ? money(booking.total_amount) : 'No total yet'}`,
+    ].join('\n')
+    : [
+      'Cash payment selected',
+      '',
+      `Code: ${bookingCode(input.bookingId)}`,
+      `Customer Telegram ID: ${input.chatId}`,
+    ].join('\n')
+
+  await Promise.all(adminChatIds.map((adminChatId) => sendMessage(adminChatId, summary, [
+    [{ text: 'Speak to Customer', url: customerChatUrl(input.chatId, customer?.telegram_username || null) }],
+    [{ text: 'Confirmed Booking', callback_data: `admin:booking_confirm:${input.bookingId}` }],
+  ])))
 
   await logTelegramConversation({
     chatId: input.chatId,

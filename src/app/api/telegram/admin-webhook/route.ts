@@ -15,9 +15,9 @@ export async function POST(request: NextRequest) {
   try {
     const update = await request.json()
     await processTelegramAdminUpdate(update)
-    return NextResponse.json({ ok: true })
   } catch (error) {
+    // Telegram retries on non-200 responses, which duplicates admin actions.
     console.error('telegram admin webhook error', error)
-    return NextResponse.json({ ok: false }, { status: 500 })
   }
+  return NextResponse.json({ ok: true })
 }

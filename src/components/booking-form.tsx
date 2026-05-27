@@ -17,6 +17,7 @@ const inputCls =
 export default function BookingForm({ defaultSent }: { defaultSent?: boolean }) {
   const [sent, setSent] = useState(defaultSent ?? false)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState({
     name: '', email: '', phone: '', car: '', date: '', notes: '', type: 'Afternoon',
   })
@@ -26,13 +27,19 @@ export default function BookingForm({ defaultSent }: { defaultSent?: boolean }) 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
+    setError(null)
     try {
       const fd = new FormData()
       Object.entries(form).forEach(([k, v]) => fd.append(k, v))
-      await createBooking(fd)
+      const result = await createBooking(fd)
+      if (!result.ok) {
+        setError(result.error || 'We could not submit your request right now.')
+        return
+      }
+
       setSent(true)
-    } catch {
-      setSent(true) // show success even if DB not set up yet
+    } catch (submissionError) {
+      setError(submissionError instanceof Error ? submissionError.message : 'We could not submit your request right now.')
     } finally {
       setLoading(false)
     }
@@ -60,6 +67,12 @@ export default function BookingForm({ defaultSent }: { defaultSent?: boolean }) 
 
   return (
     <form onSubmit={submit} className="space-y-6">
+      {error && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
       {/* Type toggle */}
       <div>
         <div className="text-[11px] tracking-[0.25em] uppercase text-neutral-500 mb-3">Booking type</div>

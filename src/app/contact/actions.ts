@@ -15,9 +15,17 @@ export async function createBooking(formData: FormData) {
 
   try {
     const supabase = createClient()
-    await supabase.from('bookings').insert(payload)
-  } catch {
-    // Supabase not wired up yet — silent fallback for local dev
-    console.log('[booking]', payload)
+    const { error } = await supabase.from('bookings').insert(payload)
+    if (error) {
+      return { ok: false as const, error: error.message }
+    }
+
+    return { ok: true as const }
+  } catch (error) {
+    console.error('[booking] create failed', error, payload)
+    return {
+      ok: false as const,
+      error: error instanceof Error ? error.message : 'Booking request failed',
+    }
   }
 }
