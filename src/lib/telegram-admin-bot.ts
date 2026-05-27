@@ -760,9 +760,7 @@ export async function notifyAdminManagerRequest(input: {
   const adminChatIds = await getAdminSubscriberChatIds()
   if (adminChatIds.length === 0) return
 
-  const marker = `ADMIN_MANAGER_REQUEST_SENT:${input.chatId}`
-  const alreadySent = await hasTelegramConversationMarker(input.chatId, marker)
-  if (alreadySent) return
+  const marker = `ADMIN_MANAGER_REQUEST_SENT:${input.chatId}:${Date.now()}`
 
   const customerLabel = input.customerName || input.telegramName || input.chatId
   const summary = [
