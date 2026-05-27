@@ -106,6 +106,8 @@ const fields: Record<string, Field> = {
   welcomeRu: { scope: 'customerText', key: 'welcomeRu', label: 'Welcome message, Russian', fallback: '⛰️ Добро пожаловать в Cape Cars Rentals. Посмотрите доступные автомобили ниже.', kind: 'textarea' },
   languageEnglish: { scope: 'buttonText', key: 'languageEnglish', label: 'English start button', fallback: 'View vehicles' },
   languageRussian: { scope: 'buttonText', key: 'languageRussian', label: 'Russian start button', fallback: 'Посмотреть автомобили' },
+  termsEn: { scope: 'buttonText', key: 'termsEn', label: 'Terms button', fallback: 'Terms and Conditions' },
+  termsRu: { scope: 'buttonText', key: 'termsRu', label: 'Terms button', fallback: 'Условия аренды' },
   chooseCategoryEn: { scope: 'customerText', key: 'chooseCategoryEn', label: 'Choose class message', fallback: 'Choose a vehicle class below.', kind: 'textarea' },
   chooseCategoryRu: { scope: 'customerText', key: 'chooseCategoryRu', label: 'Choose class message', fallback: 'Выберите класс автомобиля ниже.', kind: 'textarea' },
   luxuryEn: { scope: 'buttonText', key: 'luxuryEn', label: 'Luxury button', fallback: 'Luxury' },
@@ -145,7 +147,7 @@ const NODES: BuilderNode[] = [
     x: 48,
     y: 150,
     fields: [fields.welcomeEn, fields.welcomeRu],
-    buttons: ['languageEnglish', 'languageRussian'],
+    buttons: ['languageEnglish', 'languageRussian', 'managerEn', 'managerRu', 'termsEn', 'termsRu'],
   },
   {
     id: 'class',

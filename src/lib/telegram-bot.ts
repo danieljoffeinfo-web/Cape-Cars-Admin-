@@ -671,10 +671,20 @@ function formatCurrency(amount: number) {
 }
 
 function getLanguageButtons(config: BotControllerConfig = {}) {
-  return [[
-    { text: copy(config, 'buttonText', 'languageEnglish', 'View vehicles'), callback_data: 'lang:en' },
-    { text: copy(config, 'buttonText', 'languageRussian', 'Посмотреть автомобили'), callback_data: 'lang:ru' },
-  ]]
+  return [
+    [
+      { text: copy(config, 'buttonText', 'languageEnglish', 'View vehicles'), callback_data: 'lang:en' },
+      { text: copy(config, 'buttonText', 'languageRussian', 'Посмотреть автомобили'), callback_data: 'lang:ru' },
+    ],
+    [
+      { text: copy(config, 'buttonText', 'managerEn', 'Speak to manager'), callback_data: 'manager_request:en' },
+      { text: copy(config, 'buttonText', 'managerRu', 'Связаться с менеджером'), callback_data: 'manager_request:ru' },
+    ],
+    [
+      { text: copy(config, 'buttonText', 'termsEn', 'Terms and Conditions'), callback_data: 'terms_view:en' },
+      { text: copy(config, 'buttonText', 'termsRu', 'Условия аренды'), callback_data: 'terms_view:ru' },
+    ],
+  ]
 }
 
 function getTermsLanguageButtons(config: BotControllerConfig = {}) {
@@ -1119,7 +1129,11 @@ async function handleCallback(callback: CallbackQuery) {
     return
   }
 
-  if (data === 'terms_view') {
+  if (data === 'terms_view' || data.startsWith('terms_view:')) {
+    if (data.startsWith('terms_view:')) {
+      locale = data.replace('terms_view:', '') as Locale
+      session = await saveSession(chatId, { locale })
+    }
     const config = await getBotControllerConfig()
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Условия аренды' : 'Terms and Conditions')
     await sendDocument(
@@ -1160,7 +1174,16 @@ async function handleCallback(callback: CallbackQuery) {
     return
   }
 
-  if (data === 'manager_request') {
+  if (data === 'manager_request' || data.startsWith('manager_request:')) {
+    if (data.startsWith('manager_request:')) {
+      locale = data.replace('manager_request:', '') as Locale
+      session = await saveSession(chatId, {
+        locale,
+        telegram_name: session.telegram_name ?? formatTelegramName(callback.from),
+        telegram_username: session.telegram_username ?? callback.from?.username ?? null,
+      })
+      session = (await ensureCustomer(session)) ?? session
+    }
     const config = await getBotControllerConfig()
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Менеджер уведомлён' : 'Manager notified')
     await notifyAdminManagerRequest({
