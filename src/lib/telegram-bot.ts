@@ -91,7 +91,8 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const PUBLIC_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const PUBLIC_SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const memorySessions = new Map<string, BotSession>()
-const TERMS_PDF_VERSION = '2026-05-27-v2'
+const TERMS_PDF_VERSION = '2026-05-27-v3'
+const CAPE_CARS_LOCATION_URL = 'https://maps.app.goo.gl/LxmS4ZN7ynZjFUGb8'
 
 type BotControllerConfig = {
   botEnabled?: boolean
@@ -688,6 +689,9 @@ function getLanguageButtons(config: BotControllerConfig = {}) {
     [
       { text: copy(config, 'buttonText', 'termsEn', 'Terms and Conditions'), callback_data: 'terms_view:en' },
       { text: copy(config, 'buttonText', 'termsRu', 'Условия аренды'), callback_data: 'terms_view:ru' },
+    ],
+    [
+      { text: copy(config, 'buttonText', 'location', '📍 Location / Локация'), url: CAPE_CARS_LOCATION_URL },
     ],
   ]
 }

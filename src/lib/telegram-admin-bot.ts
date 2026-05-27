@@ -24,7 +24,7 @@ import { CATEGORY_ORDER, type VehicleCategory } from '@/lib/telegram-catalog'
 
 const TELEGRAM_ADMIN_BOT_TOKEN = process.env.TELEGRAM_ADMIN_BOT_TOKEN
 const TELEGRAM_CUSTOMER_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
-const TERMS_PDF_VERSION = '2026-05-27-v2'
+const TERMS_PDF_VERSION = '2026-05-27-v3'
 
 type AdminStep =
   | 'home'
