@@ -166,8 +166,8 @@ const TEXT = {
     ru: 'Выберите класс автомобиля ниже.',
   },
   categoryIntro: {
-    en: (segment: TelegramSegment) => `${SEGMENT_LABELS.en[segment]} vehicles. Browse by body type below.`,
-    ru: (segment: TelegramSegment) => `${SEGMENT_LABELS.ru[segment]}. Ниже автомобили по типу кузова.`,
+    en: (segment: TelegramSegment) => `${SEGMENT_LABELS.en[segment]} vehicles.`,
+    ru: (segment: TelegramSegment) => `${SEGMENT_LABELS.ru[segment]}.`,
   },
   chooseVehicle: {
     en: 'Please choose a vehicle from the category list above.',
@@ -711,9 +711,14 @@ function getTermsButton(locale: Locale, config: BotControllerConfig = {}): Teleg
   return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'termsRu' : 'termsEn', locale === 'ru' ? 'Условия аренды' : 'Terms and Conditions'), callback_data: 'terms_view' }]
 }
 
+function getBackButton(locale: Locale, target: 'start' | 'category' | 'vehicles' | 'dates', config: BotControllerConfig = {}): TelegramInlineButton[] {
+  return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'backRu' : 'backEn', locale === 'ru' ? 'Назад' : 'Go back'), callback_data: `back:${target}` }]
+}
+
 function getTermsAcceptButtons(locale: Locale, config: BotControllerConfig = {}) {
   return [
     [{ text: copy(config, 'buttonText', locale === 'ru' ? 'acceptRu' : 'acceptEn', locale === 'ru' ? 'Принять' : 'Accept'), callback_data: `terms_accept:${locale}` }],
+    getBackButton(locale, 'category', config),
     ...customButtonRows(config, 'terms', locale),
   ]
 }
@@ -722,6 +727,7 @@ function getPaymentButtons(locale: Locale, config: BotControllerConfig = {}) {
   return [
     [{ text: copy(config, 'buttonText', locale === 'ru' ? 'cashRu' : 'cashEn', locale === 'ru' ? 'Оплата наличными' : 'Cash payment option'), callback_data: `cash_payment:${locale}` }],
     getManagerButton(locale, config),
+    getBackButton(locale, 'category', config),
     ...customButtonRows(config, 'payment', locale),
   ]
 }
@@ -731,6 +737,7 @@ function getCategoryButtons(locale: Locale, config: BotControllerConfig = {}) {
     ...SEGMENT_ORDER.map((segment) => [{ text: copy(config, 'buttonText', `${segment}${locale === 'ru' ? 'Ru' : 'En'}`, SEGMENT_LABELS[locale][segment]), callback_data: `category:${segment}` }]),
     getTermsButton(locale, config),
     getManagerButton(locale, config),
+    getBackButton(locale, 'start', config),
     ...customButtonRows(config, 'class', locale),
   ]
 }
@@ -862,6 +869,7 @@ function buildCalendarKeyboard(
   mode: 'start' | 'end',
   locale: Locale,
   startDate?: string | null,
+  config: BotControllerConfig = {},
 ): TelegramInlineButton[][] {
   const today = toIsoDate(new Date())
   const monthStr = pad2(month + 1)
@@ -917,7 +925,7 @@ function buildCalendarKeyboard(
     rows.push(row)
   }
 
-  return [header, dayRow, ...rows]
+  return [header, dayRow, ...rows, getBackButton(locale, mode === 'start' ? 'vehicles' : 'dates', config)]
 }
 
 async function sendWelcome(chatId: string) {
@@ -929,22 +937,12 @@ async function sendWelcome(chatId: string) {
   )
 }
 
-function getBodyTypeButtons(locale: Locale, segment: TelegramSegment, vehicles: VehicleChoice[], config: BotControllerConfig = {}) {
-  const bodyOrder: TelegramBodyType[] = ['SUV', 'Sedan', 'Convertible', 'Coupe', 'Hatchback', 'People Mover', 'Van', 'Minibus']
-  const available = bodyOrder.filter((bodyType) => vehicles.some((vehicle) => vehicle.bodyType === bodyType))
-  return [
-    ...available.map((bodyType) => [{ text: BODY_TYPE_LABELS[locale][bodyType], callback_data: `bodytype:${segment}:${encodeURIComponent(bodyType)}` }]),
-    getManagerButton(locale, config),
-    ...customButtonRows(config, 'size', locale),
-  ]
-}
-
 async function sendCategoryPrompt(chatId: string, locale: Locale) {
   const config = await getBotControllerConfig()
   await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'chooseCategoryRu' : 'chooseCategoryEn', TEXT.chooseCategory[locale]), getCategoryButtons(locale, config))
 }
 
-async function sendBodyTypePrompt(chatId: string, segment: TelegramSegment, locale: Locale) {
+async function sendCategoryCatalog(chatId: string, segment: TelegramSegment, locale: Locale) {
   const config = await getBotControllerConfig()
   const liveVehicles = await getLiveVehiclesForSegment(segment)
   if (liveVehicles.length === 0) {
@@ -952,50 +950,26 @@ async function sendBodyTypePrompt(chatId: string, segment: TelegramSegment, loca
     return
   }
 
-  await sendMessage(
-    chatId,
-    `${TEXT.categoryIntro[locale](segment)}\n\n${copy(config, 'customerText', locale === 'ru' ? 'chooseBodyTypeRu' : 'chooseBodyTypeEn', TEXT.chooseBodyType[locale])}`,
-    getBodyTypeButtons(locale, segment, liveVehicles, config),
-  )
-}
-
-async function sendCategoryCatalog(chatId: string, segment: TelegramSegment, bodyType: TelegramBodyType, locale: Locale) {
-  const config = await getBotControllerConfig()
-  const liveVehicles = await getLiveVehiclesForSegment(segment)
-  if (liveVehicles.length === 0) {
-    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'noVehiclesRu' : 'noVehiclesEn', TEXT.noVehicles[locale]), getCategoryButtons(locale, config))
-    return
-  }
-
-  const grouped = new Map<TelegramBodyType, VehicleChoice[]>()
+  await sendMessage(chatId, TEXT.categoryIntro[locale](segment), [getBackButton(locale, 'category', config)])
 
   for (const vehicle of liveVehicles) {
-    const currentBodyType = vehicle.bodyType
-    grouped.set(currentBodyType, [...(grouped.get(currentBodyType) ?? []), vehicle])
-  }
-
-  const group = grouped.get(bodyType)
-  if (!group || group.length === 0) {
-    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'noVehiclesRu' : 'noVehiclesEn', TEXT.noVehicles[locale]), getBodyTypeButtons(locale, segment, liveVehicles, config))
-    return
-  }
-
-  await sendMessage(chatId, `• ${BODY_TYPE_LABELS[locale][bodyType]}`)
-
-  for (const vehicle of group) {
+    const buttons = [
+      [{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }],
+      getBackButton(locale, 'category', config),
+    ]
     try {
       if (vehicle.imageUrl) {
         await sendPhoto(
           chatId,
           vehicle.imageUrl,
           formatVehicleCaption(vehicle, locale),
-          [[{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }]],
+          buttons,
         )
       } else {
         await sendMessage(
           chatId,
           formatVehicleCaption(vehicle, locale),
-          [[{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }]],
+          buttons,
         )
       }
     } catch (error) {
@@ -1003,7 +977,7 @@ async function sendCategoryCatalog(chatId: string, segment: TelegramSegment, bod
       await sendMessage(
         chatId,
         formatVehicleCaption(vehicle, locale),
-        [[{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }]],
+        buttons,
       )
     }
   }
@@ -1036,7 +1010,7 @@ async function handleCategorySelect(callback: CallbackQuery, category: TelegramS
   await logInboundText(chatId, `Selected segment: ${category}`, 'button')
 
   await saveSession(chatId, {
-    step: 'choosing_body_type',
+    step: 'choosing_vehicle',
     selected_segment: category,
     selected_category: null,
     selected_body_type: null,
@@ -1055,7 +1029,7 @@ async function handleCategorySelect(callback: CallbackQuery, category: TelegramS
   })
 
   await answerCallbackQuery(callback.id, SEGMENT_LABELS[locale][category])
-  await sendBodyTypePrompt(chatId, category, locale)
+  await sendCategoryCatalog(chatId, category, locale)
 }
 
 async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string, source: 'db' | 'static') {
@@ -1102,8 +1076,9 @@ async function handleVehicleSelect(callback: CallbackQuery, vehicleId: string, s
 
   await answerCallbackQuery(callback.id, TEXT.bookingVehicle[locale](vehicle.model))
 
+  const config = await getBotControllerConfig()
   const now = new Date()
-  const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), vehicle.blockedRanges, 'start', locale)
+  const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), vehicle.blockedRanges, 'start', locale, null, config)
   await sendMessage(chatId, TEXT.calendarStart[locale](vehicle.model), keyboard)
 }
 
@@ -1122,6 +1097,90 @@ async function handleCallback(callback: CallbackQuery) {
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Русский' : 'English')
     await sendCategoryPrompt(chatId, locale)
     return
+  }
+
+  if (data.startsWith('back:')) {
+    const target = data.replace('back:', '') as 'start' | 'category' | 'vehicles' | 'dates'
+    const config = await getBotControllerConfig()
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Назад' : 'Go back')
+
+    if (target === 'start') {
+      await saveSession(chatId, {
+        step: 'choosing_language',
+        selected_segment: null,
+        selected_category: null,
+        selected_body_type: null,
+        selected_vehicle_id: null,
+        selected_vehicle_model: null,
+        selected_vehicle_display_model: null,
+        daily_rate: null,
+        requested_start_date: null,
+        requested_days: null,
+        requested_end_date: null,
+        total_amount: null,
+        blocked_ranges: [],
+      })
+      await sendWelcome(chatId)
+      return
+    }
+
+    if (target === 'category') {
+      await saveSession(chatId, {
+        step: 'choosing_category',
+        selected_segment: null,
+        selected_category: null,
+        selected_body_type: null,
+        selected_vehicle_id: null,
+        selected_vehicle_model: null,
+        selected_vehicle_display_model: null,
+        daily_rate: null,
+        requested_start_date: null,
+        requested_days: null,
+        requested_end_date: null,
+        total_amount: null,
+        blocked_ranges: [],
+      })
+      await sendCategoryPrompt(chatId, locale)
+      return
+    }
+
+    if (target === 'vehicles') {
+      const segment = session.selected_segment
+      if (segment) {
+        await saveSession(chatId, {
+          step: 'choosing_vehicle',
+          selected_vehicle_id: null,
+          selected_vehicle_model: null,
+          selected_vehicle_display_model: null,
+          selected_category: null,
+          selected_body_type: null,
+          daily_rate: null,
+          requested_start_date: null,
+          requested_days: null,
+          requested_end_date: null,
+          total_amount: null,
+          blocked_ranges: [],
+        })
+        await sendCategoryCatalog(chatId, segment, locale)
+      } else {
+        await sendCategoryPrompt(chatId, locale)
+      }
+      return
+    }
+
+    if (target === 'dates') {
+      const now = new Date()
+      const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), session.blocked_ranges ?? [], 'start', locale, null, config)
+      await saveSession(chatId, {
+        step: 'awaiting_start_date',
+        requested_start_date: null,
+        requested_days: null,
+        requested_end_date: null,
+        total_amount: null,
+      })
+      await sendMessage(chatId, TEXT.calendarStart[locale](session.selected_vehicle_display_model ?? session.selected_vehicle_model ?? ''), keyboard)
+      return
+    }
   }
 
   if (data.startsWith('terms:')) {
@@ -1212,21 +1271,6 @@ async function handleCallback(callback: CallbackQuery) {
     return
   }
 
-  if (data.startsWith('bodytype:')) {
-    const [segment, rawBodyType] = data.replace('bodytype:', '').split(':')
-    if (!segment || !rawBodyType) {
-      await answerCallbackQuery(callback.id, locale === 'ru' ? 'Категория недоступна' : 'Category unavailable')
-      await sendCategoryPrompt(chatId, locale)
-      return
-    }
-    const bodyType = decodeURIComponent(rawBodyType) as TelegramBodyType
-    await logInboundText(chatId, `Selected body type: ${bodyType}`, 'button')
-    await saveSession(chatId, { step: 'choosing_vehicle', selected_segment: segment as TelegramSegment, selected_body_type: bodyType })
-    await answerCallbackQuery(callback.id, BODY_TYPE_LABELS[locale][bodyType])
-    await sendCategoryCatalog(chatId, segment as TelegramSegment, bodyType, locale)
-    return
-  }
-
   if (data.startsWith('bookdb:')) {
     await handleVehicleSelect(callback, data.replace('bookdb:', ''), 'db')
     return
@@ -1246,6 +1290,7 @@ async function handleCallback(callback: CallbackQuery) {
     const selectedDate = data.slice('cal:select:'.length)
     const session = await getSession(chatId)
     const locale = t(session.locale)
+    const config = await getBotControllerConfig()
 
     await answerCallbackQuery(callback.id)
     await logInboundText(chatId, `Selected date: ${selectedDate}`, 'button')
@@ -1261,7 +1306,7 @@ async function handleCallback(callback: CallbackQuery) {
       await persistBooking(next, 'draft')
 
       const [yr, mo] = selectedDate.split('-').map(Number)
-      const keyboard = buildCalendarKeyboard(yr, mo - 1, next.blocked_ranges ?? [], 'end', locale, selectedDate)
+      const keyboard = buildCalendarKeyboard(yr, mo - 1, next.blocked_ranges ?? [], 'end', locale, selectedDate, config)
       await sendMessage(chatId, TEXT.calendarEnd[locale](selectedDate), keyboard)
       return
     }
@@ -1294,6 +1339,7 @@ async function handleCallback(callback: CallbackQuery) {
           [{ text: locale === 'ru' ? 'Подтвердить' : 'Confirm', callback_data: 'confirm_booking' }],
           [{ text: locale === 'ru' ? 'Изменить даты' : 'Change dates', callback_data: 'change_booking' }],
           [{ text: locale === 'ru' ? 'Другие автомобили' : 'View other vehicles', callback_data: 'view_other_vehicles' }],
+          getBackButton(locale, 'dates', config),
         ],
       )
       return
@@ -1310,6 +1356,7 @@ async function handleCallback(callback: CallbackQuery) {
 
     const session = await getSession(chatId)
     const locale = t(session.locale)
+    const config = await getBotControllerConfig()
 
     await answerCallbackQuery(callback.id)
 
@@ -1320,6 +1367,7 @@ async function handleCallback(callback: CallbackQuery) {
       mode,
       locale,
       mode === 'end' ? session.requested_start_date : null,
+      config,
     )
 
     const text = mode === 'start'
@@ -1348,6 +1396,7 @@ async function handleCallback(callback: CallbackQuery) {
   }
 
   if (data === 'change_booking') {
+    const config = await getBotControllerConfig()
     await logInboundText(chatId, 'Make changes', 'button')
     const next = await saveSession(chatId, {
       step: 'awaiting_start_date',
@@ -1358,7 +1407,7 @@ async function handleCallback(callback: CallbackQuery) {
     })
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Изменить' : 'Make changes')
     const now = new Date()
-    const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), next.blocked_ranges ?? [], 'start', locale)
+    const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), next.blocked_ranges ?? [], 'start', locale, null, config)
     await sendMessage(chatId, TEXT.calendarStart[locale](next.selected_vehicle_display_model ?? next.selected_vehicle_model ?? ''), keyboard)
     return
   }
@@ -1430,8 +1479,10 @@ async function handleMessage(message: TelegramMessage) {
   }
 
   if (session.step === 'choosing_body_type') {
-    if (session.selected_segment) {
-      await sendBodyTypePrompt(chatId, session.selected_segment, locale)
+    const segment = session.selected_segment
+    if (segment) {
+      session = await saveSession(chatId, { step: 'choosing_vehicle' })
+      await sendCategoryCatalog(chatId, segment, locale)
     } else {
       await sendCategoryPrompt(chatId, locale)
     }
@@ -1444,16 +1495,18 @@ async function handleMessage(message: TelegramMessage) {
   }
 
   if (session.step === 'awaiting_start_date') {
+    const config = await getBotControllerConfig()
     const now = new Date()
-    const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), session.blocked_ranges ?? [], 'start', locale)
+    const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), session.blocked_ranges ?? [], 'start', locale, null, config)
     await sendMessage(chatId, TEXT.calendarStart[locale](session.selected_vehicle_display_model ?? session.selected_vehicle_model ?? ''), keyboard)
     return
   }
 
   if (session.step === 'awaiting_end_date') {
+    const config = await getBotControllerConfig()
     const startDate = session.requested_start_date!
     const [yr, mo] = startDate.split('-').map(Number)
-    const keyboard = buildCalendarKeyboard(yr, mo - 1, session.blocked_ranges ?? [], 'end', locale, startDate)
+    const keyboard = buildCalendarKeyboard(yr, mo - 1, session.blocked_ranges ?? [], 'end', locale, startDate, config)
     await sendMessage(chatId, TEXT.calendarEnd[locale](startDate), keyboard)
     return
   }
