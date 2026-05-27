@@ -24,6 +24,7 @@ import { CATEGORY_ORDER, type VehicleCategory } from '@/lib/telegram-catalog'
 
 const TELEGRAM_ADMIN_BOT_TOKEN = process.env.TELEGRAM_ADMIN_BOT_TOKEN
 const TELEGRAM_CUSTOMER_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
+const TERMS_PDF_VERSION = '2026-05-27-v2'
 
 type AdminStep =
   | 'home'
@@ -375,6 +376,10 @@ function termsAcceptButtons(locale: CustomerLocale): InlineButton[][] {
   return [[{ text: locale === 'ru' ? 'Принять' : 'Accept', callback_data: `terms_accept:${locale}` }]]
 }
 
+function termsPdfUrl(locale: CustomerLocale) {
+  return `${publicBaseUrl()}/telegram-terms/cape-cars-rental-terms-${locale}-${TERMS_PDF_VERSION}.pdf`
+}
+
 async function sendCustomerBookingConfirmed(booking: TelegramBookingWithCustomer) {
   const persisted = await getTelegramSession<CustomerSessionData>(booking.chat_id)
   const previousSession = persisted?.session_data ?? null
@@ -392,7 +397,7 @@ async function sendCustomerBookingConfirmed(booking: TelegramBookingWithCustomer
 
   await customerSendDocument(
     booking.chat_id,
-    `${publicBaseUrl()}/telegram-terms/cape-cars-rental-terms-${locale}.pdf`,
+    termsPdfUrl(locale),
     termsCaption(locale),
     termsAcceptButtons(locale),
   )

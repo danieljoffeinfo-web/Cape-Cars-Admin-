@@ -91,6 +91,7 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const PUBLIC_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
 const PUBLIC_SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 const memorySessions = new Map<string, BotSession>()
+const TERMS_PDF_VERSION = '2026-05-27-v2'
 
 type BotControllerConfig = {
   botEnabled?: boolean
@@ -670,6 +671,10 @@ function formatCurrency(amount: number) {
   return `R ${amount.toLocaleString('en-ZA')}`
 }
 
+function termsPdfUrl(locale: Locale) {
+  return `${publicBaseUrl()}/telegram-terms/cape-cars-rental-terms-${locale}-${TERMS_PDF_VERSION}.pdf`
+}
+
 function getLanguageButtons(config: BotControllerConfig = {}) {
   return [
     [
@@ -1122,7 +1127,7 @@ async function handleCallback(callback: CallbackQuery) {
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Условия аренды' : 'Rental terms')
     await sendDocument(
       chatId,
-      `${publicBaseUrl()}/telegram-terms/cape-cars-rental-terms-${locale}.pdf`,
+      termsPdfUrl(locale),
       copy(config, 'customerText', locale === 'ru' ? 'termsDocumentCaptionRu' : 'termsDocumentCaptionEn', TEXT.termsDocumentCaption[locale]),
       getTermsAcceptButtons(locale, config),
     )
@@ -1138,7 +1143,7 @@ async function handleCallback(callback: CallbackQuery) {
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Условия аренды' : 'Terms and Conditions')
     await sendDocument(
       chatId,
-      `${publicBaseUrl()}/telegram-terms/cape-cars-rental-terms-${locale}.pdf`,
+      termsPdfUrl(locale),
       copy(config, 'customerText', locale === 'ru' ? 'termsDocumentViewCaptionRu' : 'termsDocumentViewCaptionEn', TEXT.termsDocumentViewCaption[locale]),
       getCategoryButtons(locale, config),
     )
