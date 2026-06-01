@@ -535,14 +535,20 @@ async function restorePersistedSession(chatId: string): Promise<BotSession | nul
 }
 
 async function getSession(chatId: string): Promise<BotSession> {
-  const existing = memorySessions.get(chatId)
-  if (existing) return existing
-
+  const existing = memorySessions.get(chatId) ?? null
   const persisted = await restorePersistedSession(chatId)
+
   if (persisted) {
-    memorySessions.set(chatId, persisted)
-    return persisted
+    const existingUpdatedAt = existing?.updated_at ? new Date(existing.updated_at).getTime() : 0
+    const persistedUpdatedAt = persisted.updated_at ? new Date(persisted.updated_at).getTime() : 0
+
+    if (!existing || persistedUpdatedAt >= existingUpdatedAt || stepRank(persisted.step) > stepRank(existing.step)) {
+      memorySessions.set(chatId, persisted)
+      return persisted
+    }
   }
+
+  if (existing) return existing
 
   const restored = await restoreSession(chatId)
   if (restored) {
