@@ -14,6 +14,7 @@ export type SessionStep =
   | 'awaiting_start_date'
   | 'awaiting_end_date'
   | 'awaiting_confirmation'
+  | 'awaiting_admin_confirmation'
   | 'awaiting_full_name'
   | 'awaiting_phone'
   | 'awaiting_id_image'
@@ -307,6 +308,10 @@ const TEXT = {
     en: '✅ Payment proof received. Cape Cars admin has been notified and will confirm shortly.\n\nA manager will be in touch shortly.',
     ru: '✅ Подтверждение оплаты получено. Администратор Cape Cars уведомлён и скоро подтвердит оплату.\n\nМенеджер свяжется с вами в ближайшее время.',
   },
+  awaitingAdminApproval: {
+    en: 'Thanks. Your booking request has been sent to Cape Cars admin for availability confirmation.\n\nAs soon as the vehicle and dates are confirmed, we will ask for your passport/ID and driver’s license photos.',
+    ru: 'Спасибо. Ваш запрос на бронирование отправлен администратору Cape Cars для подтверждения доступности.\n\nКак только автомобиль и даты будут подтверждены, мы попросим фото паспорта/ID и водительского удостоверения.',
+  },
 } as const
 
 async function getBotControllerConfig(): Promise<BotControllerConfig> {
@@ -400,6 +405,7 @@ function stepRank(step?: SessionStep | string | null) {
     'awaiting_start_date',
     'awaiting_end_date',
     'awaiting_confirmation',
+    'awaiting_admin_confirmation',
     'awaiting_full_name',
     'awaiting_phone',
     'awaiting_id_image',
@@ -438,13 +444,18 @@ async function restoreSession(chatId: string): Promise<BotSession | null> {
     if (!booking.vehicle_name) return 'choosing_vehicle'
     if (!booking.start_date) return 'awaiting_start_date'
     if (!booking.end_date || !booking.total_days) return 'awaiting_end_date'
-    if (!(customer?.full_name ?? null)) return 'awaiting_full_name'
-    if (!(customer?.phone ?? null)) return 'awaiting_phone'
+    if (booking.status === 'quote_ready') return 'awaiting_confirmation'
+    if (booking.status === 'pending' && !booking.id_file_id && !booking.license_file_id && !booking.license_back_file_id) {
+      return 'awaiting_admin_confirmation'
+    }
+    if (booking.status === 'customer_details_pending') {
+      if (!(customer?.full_name ?? null)) return 'awaiting_full_name'
+      if (!(customer?.phone ?? null)) return 'awaiting_phone'
+    }
     if (!booking.id_file_id) return 'awaiting_id_image'
     if (!booking.license_file_id) return 'awaiting_license_image'
     if (!booking.license_back_file_id) return 'awaiting_license_back_image'
-    if (booking.status === 'quote_ready') return 'awaiting_confirmation'
-    if (booking.status === 'confirmed_booking') return 'awaiting_terms_acceptance'
+    if (booking.status === 'confirmed_booking') return 'awaiting_payment_proof'
     if (booking.status === 'awaiting_payment_confirmation') return 'awaiting_payment_proof'
     return 'completed'
   })()
@@ -731,9 +742,7 @@ function getTermsAcceptButtons(locale: Locale, config: BotControllerConfig = {})
 
 function getPaymentButtons(locale: Locale, config: BotControllerConfig = {}) {
   return [
-    [{ text: copy(config, 'buttonText', locale === 'ru' ? 'cashRu' : 'cashEn', locale === 'ru' ? 'Оплата наличными' : 'Cash payment option'), callback_data: `cash_payment:${locale}` }],
     getManagerButton(locale, config),
-    getBackButton(locale, 'category', config),
     ...customButtonRows(config, 'payment', locale),
   ]
 }
@@ -1297,18 +1306,10 @@ async function handleCallback(callback: CallbackQuery) {
   if (data.startsWith('cash_payment:')) {
     locale = data.replace('cash_payment:', '') as Locale
     const config = await getBotControllerConfig()
-    const next = await saveSession(chatId, { locale, step: 'completed' })
-    await persistBooking(next, 'confirmed_booking')
-    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Оплата наличными' : 'Cash payment option')
-    try {
-      await notifyAdminCashPayment({
-        bookingId: next.booking_id ?? '',
-        chatId,
-      })
-    } catch (error) {
-      console.error('notifyAdminCashPayment failed', error)
-    }
-    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'cashPaymentRu' : 'cashPaymentEn', TEXT.cashPayment[locale]))
+    const next = await saveSession(chatId, { locale, step: 'awaiting_payment_proof' })
+    await persistBooking(next, 'awaiting_payment_confirmation')
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Отправьте подтверждение оплаты' : 'Send payment confirmation')
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'paymentProofRu' : 'paymentProofEn', TEXT.paymentProof[locale]))
     return
   }
 
@@ -1488,12 +1489,31 @@ async function handleCallback(callback: CallbackQuery) {
   locale = t(session.locale)
 
   if (data === 'confirm_booking') {
-    const config = await getBotControllerConfig()
     await logInboundText(chatId, 'Confirmed booking', 'button')
-    const next = await saveSession(chatId, { step: 'awaiting_full_name' })
-    await persistBooking(next, 'customer_details_pending')
+    let next = await saveSession(chatId, { step: 'awaiting_admin_confirmation' })
+    next = (await ensureCustomer(next)) ?? next
+    await persistBooking(next, 'pending')
+
+    try {
+      await notifyAdminNewBooking({
+        bookingId: next.booking_id ?? '',
+        chatId,
+        customerName: next.customer_full_name ?? next.telegram_name ?? null,
+        phone: next.customer_phone ?? null,
+        username: next.telegram_username ?? null,
+        vehicleName: next.selected_vehicle_model ?? null,
+        vehicleCategory: next.selected_category ?? null,
+        startDate: next.requested_start_date ?? null,
+        endDate: next.requested_end_date ?? null,
+        totalDays: next.requested_days ?? null,
+        totalAmount: next.total_amount ?? null,
+      })
+    } catch (error) {
+      console.error('notifyAdminNewBooking failed', error)
+    }
+
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Подтверждено' : 'Confirmed')
-    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'fullNameRu' : 'fullNameEn', TEXT.fullName[locale]))
+    await sendMessage(chatId, TEXT.awaitingAdminApproval[locale])
     return
   }
 
@@ -1612,6 +1632,11 @@ async function handleMessage(message: TelegramMessage) {
     return
   }
 
+  if (session.step === 'awaiting_admin_confirmation') {
+    await sendMessage(chatId, TEXT.awaitingAdminApproval[locale])
+    return
+  }
+
   if (session.step === 'awaiting_confirmation' && text && text.length >= 3 && text.includes(' ')) {
     session = await saveSession(chatId, {
       step: 'awaiting_phone',
@@ -1716,32 +1741,12 @@ async function handleMessage(message: TelegramMessage) {
       meta: { fileId },
     })
 
-    session = await saveSession(chatId, { step: 'completed', license_back_file_id: fileId })
+    const config = await getBotControllerConfig()
+    session = await saveSession(chatId, { step: 'awaiting_payment_proof', license_back_file_id: fileId })
     session = (await ensureCustomer(session)) ?? session
-    await persistBooking(session, 'pending')
-
-    try {
-      await notifyAdminNewBooking({
-        bookingId: session.booking_id ?? '',
-        chatId,
-        customerName: session.customer_full_name ?? session.telegram_name ?? null,
-        phone: session.customer_phone ?? null,
-        username: session.telegram_username ?? null,
-        vehicleName: session.selected_vehicle_model ?? null,
-        vehicleCategory: session.selected_category ?? null,
-        startDate: session.requested_start_date ?? null,
-        endDate: session.requested_end_date ?? null,
-        totalDays: session.requested_days ?? null,
-        totalAmount: session.total_amount ?? null,
-        idFileId: session.id_file_id ?? null,
-        licenseFileId: session.license_file_id ?? null,
-        licenseBackFileId: fileId ?? null,
-      })
-    } catch (error) {
-      console.error('notifyAdminNewBooking failed', error)
-    }
-
-    await sendMessage(chatId, TEXT.done[locale](bookingCode(session.booking_id)))
+    await persistBooking(session, 'awaiting_payment_confirmation')
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'paymentDetailsRu' : 'paymentDetailsEn', TEXT.paymentDetails[locale](session.total_amount)), getPaymentButtons(locale, config))
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'paymentProofRu' : 'paymentProofEn', TEXT.paymentProof[locale]))
     return
   }
 

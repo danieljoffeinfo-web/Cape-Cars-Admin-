@@ -388,19 +388,19 @@ async function sendCustomerBookingConfirmed(booking: TelegramBookingWithCustomer
   await upsertTelegramSession({
     ...(previousSession ?? {}),
     chat_id: booking.chat_id,
-    step: 'awaiting_terms_acceptance',
+    step: 'awaiting_id_image',
     locale,
     booking_id: booking.id,
     customer_id: booking.customer_id,
     total_amount: booking.total_amount ?? previousSession?.total_amount ?? null,
   })
 
-  await customerSendDocument(
-    booking.chat_id,
-    termsPdfUrl(locale),
-    termsCaption(locale),
-    termsAcceptButtons(locale),
-  )
+  await customerTelegramApi('sendMessage', {
+    chat_id: booking.chat_id,
+    text: locale === 'ru'
+      ? '✅ Даты и автомобиль подтверждены. Теперь, пожалуйста, отправьте чёткое фото вашего паспорта или ID.'
+      : '✅ Your dates and vehicle have been confirmed. Please now send a clear photo of your passport or ID.',
+  })
 }
 
 function customerChatUrl(chatId: string, username?: string | null) {
@@ -816,7 +816,7 @@ export async function notifyAdminNewBooking(input: {
 
   const booking = await getTelegramBookingById(input.bookingId)
   if (booking) {
-    await Promise.all(adminChatIds.map((adminChatId) => sendBookingSummary(adminChatId, booking, 'New booking', { includeDocuments: true })))
+    await Promise.all(adminChatIds.map((adminChatId) => sendBookingSummary(adminChatId, booking, 'Availability confirmation requested')))
     await logTelegramConversation({
       chatId: input.chatId,
       direction: 'outbound',
@@ -828,7 +828,7 @@ export async function notifyAdminNewBooking(input: {
   }
 
   const summary = [
-    'New booking',
+    'Availability confirmation requested',
     '',
     `Code: ${bookingCode(input.bookingId)}`,
     `Customer: ${input.customerName || 'Unknown customer'}`,
