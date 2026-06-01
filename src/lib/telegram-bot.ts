@@ -506,6 +506,8 @@ async function restorePersistedSession(chatId: string): Promise<BotSession | nul
   if (!data || data.chat_id !== chatId || !data.step) return null
 
   const restoredBooking = await restoreSession(chatId)
+  const sessionUpdatedAt = new Date(record.updated_at ?? data.updated_at ?? 0).getTime()
+  const bookingUpdatedAt = restoredBooking?.updated_at ? new Date(restoredBooking.updated_at).getTime() : 0
 
   if (
     restoredBooking
@@ -521,7 +523,11 @@ async function restorePersistedSession(chatId: string): Promise<BotSession | nul
     }
   }
 
-  if (restoredBooking && stepRank(restoredBooking.step) > stepRank(data.step)) {
+  if (
+    restoredBooking
+    && bookingUpdatedAt > sessionUpdatedAt
+    && stepRank(restoredBooking.step) > stepRank(data.step)
+  ) {
     return restoredBooking
   }
 
@@ -532,6 +538,10 @@ async function restorePersistedSession(chatId: string): Promise<BotSession | nul
     chat_id: chatId,
     updated_at: record.updated_at ?? data.updated_at ?? new Date().toISOString(),
   }
+}
+
+function getCachedSession(chatId: string) {
+  return memorySessions.get(chatId) ?? null
 }
 
 async function getSession(chatId: string): Promise<BotSession> {
@@ -636,7 +646,7 @@ async function telegramApi(method: string, payload: Record<string, unknown>) {
 }
 
 async function sendMessage(chatId: string, text: string, buttons?: TelegramInlineButton[][]) {
-  const session = await getSession(chatId)
+  const session = getCachedSession(chatId) ?? await getSession(chatId)
   try {
     await telegramApi('sendMessage', {
       chat_id: chatId,
@@ -671,7 +681,7 @@ async function editMessage(chatId: string, messageId: number, text: string, butt
 }
 
 async function sendPhoto(chatId: string, photo: string, caption: string, buttons?: TelegramInlineButton[][]) {
-  const session = await getSession(chatId)
+  const session = getCachedSession(chatId) ?? await getSession(chatId)
   await telegramApi('sendPhoto', {
     chat_id: chatId,
     photo,
@@ -689,7 +699,7 @@ async function sendPhoto(chatId: string, photo: string, caption: string, buttons
 }
 
 async function sendDocument(chatId: string, document: string, caption: string, buttons?: TelegramInlineButton[][]) {
-  const session = await getSession(chatId)
+  const session = getCachedSession(chatId) ?? await getSession(chatId)
   await telegramApi('sendDocument', {
     chat_id: chatId,
     document,
