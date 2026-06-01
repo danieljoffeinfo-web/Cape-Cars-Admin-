@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import VehicleModal from '@/components/vehicle-modal'
 import { useAdminLanguage } from '@/app/admin/admin-language'
 import type { Vehicle } from '@/lib/fleet'
+import { getTelegramSegment, type TelegramSegment } from '@/lib/telegram-catalog'
 
 type BlockedRange = {
   startDate: string
@@ -26,6 +27,13 @@ const statusColor: Record<string, string> = {
 const STATUSES = ['Available', 'Booked', 'Service'] as const
 type VehicleStatus = typeof STATUSES[number]
 
+const SEGMENT_FILTERS: Array<{ key: 'all' | TelegramSegment; en: string; ru: string }> = [
+  { key: 'all', en: 'All vehicles', ru: 'Все авто' },
+  { key: 'luxury', en: 'Luxury', ru: 'Люкс' },
+  { key: 'mid', en: 'Mid Tier', ru: 'Средний класс' },
+  { key: 'economy', en: 'Economy', ru: 'Эконом' },
+]
+
 export default function FleetAdmin() {
   const { locale, t } = useAdminLanguage()
   const [vehicles, setVehicles] = useState<FleetVehicle[]>([])
@@ -36,6 +44,7 @@ export default function FleetAdmin() {
   const [confirmDeleteBookings, setConfirmDeleteBookings] = useState(false)
   const [deletingBookings, setDeletingBookings] = useState(false)
   const [bookingCleanupStatus, setBookingCleanupStatus] = useState<string | null>(null)
+  const [segmentFilter, setSegmentFilter] = useState<'all' | TelegramSegment>('all')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -97,9 +106,13 @@ export default function FleetAdmin() {
     await load()
   }
 
-  const available = vehicles.filter(c => effectiveStatus(c) === 'Available').length
-  const booked    = vehicles.filter(c => effectiveStatus(c) === 'Booked').length
-  const service   = vehicles.filter(c => effectiveStatus(c) === 'Service').length
+  const vehicleSegment = (car: FleetVehicle): TelegramSegment => getTelegramSegment(car.model, car.cat)
+
+  const filteredVehicles = vehicles.filter((car) => segmentFilter === 'all' || vehicleSegment(car) === segmentFilter)
+
+  const available = filteredVehicles.filter(c => effectiveStatus(c) === 'Available').length
+  const booked    = filteredVehicles.filter(c => effectiveStatus(c) === 'Booked').length
+  const service   = filteredVehicles.filter(c => effectiveStatus(c) === 'Service').length
 
   const formatRange = (range: BlockedRange) => {
     if (range.startDate === range.endDate) return range.startDate
@@ -186,13 +199,28 @@ export default function FleetAdmin() {
           </div>
         )}
 
+        <div className="flex flex-wrap items-center gap-2">
+          {SEGMENT_FILTERS.map((filter) => {
+            const active = segmentFilter === filter.key
+            return (
+              <button
+                key={filter.key}
+                onClick={() => setSegmentFilter(filter.key)}
+                className={`rounded-full border px-4 py-2 text-sm transition-colors ${active ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-black/[0.08] bg-white text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900'}`}
+              >
+                {locale === 'ru' ? filter.ru : filter.en}
+              </button>
+            )
+          })}
+        </div>
+
         {/* Summary chips */}
         <div className="flex flex-wrap gap-3">
           {[
             { label: 'Available', count: available, cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
             { label: 'Booked',    count: booked,    cls: 'bg-amber-50 text-amber-700 border-amber-200'   },
             { label: 'Service',   count: service,   cls: 'bg-red-50 text-red-600 border-red-200'         },
-            { label: 'Total',     count: vehicles.length, cls: 'bg-neutral-100 text-neutral-700 border-neutral-200' },
+            { label: 'Total',     count: filteredVehicles.length, cls: 'bg-neutral-100 text-neutral-700 border-neutral-200' },
           ].map(s => (
             <div key={s.label} className={`flex items-center gap-2 px-4 py-2 rounded-full border text-sm ${s.cls}`}>
               <span className="tabular-nums font-medium">{s.count}</span>
@@ -208,7 +236,7 @@ export default function FleetAdmin() {
               <svg className="animate-spin mr-2" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
               {t('Loading fleet…', 'Загрузка автопарка…')}
             </div>
-          ) : vehicles.length === 0 ? (
+          ) : filteredVehicles.length === 0 ? (
             <div className="py-20 text-center text-neutral-400 text-sm">
               {t('No vehicles yet.', 'Автомобилей пока нет.')}{' '}
               <button onClick={() => setModal('add')} className="text-neutral-900 underline underline-offset-2">{t('Add your first vehicle.', 'Добавить первый автомобиль.')}</button>
@@ -229,7 +257,7 @@ export default function FleetAdmin() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-black/[0.04]">
-                  {vehicles.map(car => (
+                  {filteredVehicles.map(car => (
                     <tr key={car.id} className="hover:bg-neutral-50 transition-colors">
                       <td className="px-5 py-3">
                         {car.image_url ? (

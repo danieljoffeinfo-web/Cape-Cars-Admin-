@@ -38,7 +38,7 @@ const emptySettings: Settings = { botEnabled: true, customerText: {}, adminText:
 const CATEGORIES = ['Luxury Vehicles', 'Mid Tier Vehicles', 'Large Vehicles'] as const
 const BODY_TYPES: VehicleBodyType[] = ['SUV', 'Sedan', 'Convertible', 'Coupe', 'Hatchback', 'People Mover', 'Van', 'Minibus']
 const STATUS_OPTIONS = ['Available', 'Booked', 'Service'] as const
-const CUSTOM_BUTTON_NODES = ['class', 'size', 'terms', 'payment'] as const
+const CUSTOM_BUTTON_NODES = ['start', 'class', 'size', 'terms', 'payment'] as const
 const BODY_TYPE_LABELS: Record<Locale, Partial<Record<VehicleBodyType, string>>> = {
   en: { SUV: 'SUVs', Sedan: 'Sedans', Convertible: 'Convertibles', Coupe: 'Coupes', Hatchback: 'Hatchbacks', 'People Mover': 'People Movers', Van: 'Vans', Minibus: 'Minibuses' },
   ru: { SUV: 'Внедорожники', Sedan: 'Седаны', Convertible: 'Кабриолеты', Coupe: 'Купе', Hatchback: 'Хэтчбеки', 'People Mover': 'Минивэны', Van: 'Фургоны', Minibus: 'Микроавтобусы' },
@@ -106,6 +106,7 @@ const fields: Record<string, Field> = {
   welcomeRu: { scope: 'customerText', key: 'welcomeRu', label: 'Welcome message, Russian', fallback: '⛰️ Добро пожаловать в Cape Cars Rentals. Посмотрите доступные автомобили ниже.', kind: 'textarea' },
   languageEnglish: { scope: 'buttonText', key: 'languageEnglish', label: 'English start button', fallback: 'View vehicles' },
   languageRussian: { scope: 'buttonText', key: 'languageRussian', label: 'Russian start button', fallback: 'Посмотреть автомобили' },
+  reviews: { scope: 'buttonText', key: 'reviews', label: 'Reviews button', fallback: '⭐ Reviews / Отзывы' },
   termsEn: { scope: 'buttonText', key: 'termsEn', label: 'Terms button', fallback: 'Terms and Conditions' },
   termsRu: { scope: 'buttonText', key: 'termsRu', label: 'Terms button', fallback: 'Условия аренды' },
   chooseCategoryEn: { scope: 'customerText', key: 'chooseCategoryEn', label: 'Choose class message', fallback: 'Choose a vehicle class below.', kind: 'textarea' },
@@ -147,7 +148,7 @@ const NODES: BuilderNode[] = [
     x: 48,
     y: 150,
     fields: [fields.welcomeEn, fields.welcomeRu],
-    buttons: ['languageEnglish', 'languageRussian', 'managerEn', 'managerRu', 'termsEn', 'termsRu'],
+    buttons: ['languageEnglish', 'languageRussian', 'reviews', 'managerEn', 'managerRu', 'termsEn', 'termsRu'],
   },
   {
     id: 'class',
