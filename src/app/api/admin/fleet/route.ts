@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/server'
 import { getFleetAvailability } from '@/lib/telegram-admin'
+import { VEHICLE_BODY_TYPES, VEHICLE_CATEGORIES } from '@/lib/vehicle-taxonomy'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const CATEGORIES = new Set(['Luxury Vehicles', 'Mid Tier Vehicles', 'Large Vehicles'])
-const BODY_TYPES = new Set(['SUV', 'Sedan', 'Convertible', 'Coupe', 'Hatchback', 'Van', 'Minibus', 'People Mover'])
+const CATEGORIES = new Set(VEHICLE_CATEGORIES)
+const BODY_TYPES = new Set(VEHICLE_BODY_TYPES)
 const FUELS = new Set(['Petrol', 'Hybrid', 'Electric', 'Diesel'])
 const STATUSES = new Set(['Available', 'Booked', 'Service'])
 
@@ -60,7 +61,7 @@ async function vehiclePayload(body: any) {
     : null
 
   if (!model) throw new Error('Model name is required')
-  if (!CATEGORIES.has(cat)) throw new Error('Choose Luxury Vehicles, Mid Tier Vehicles, or Large Vehicles')
+  if (!CATEGORIES.has(cat)) throw new Error('Choose a valid vehicle category')
   if (!FUELS.has(fuel)) throw new Error('Choose a valid fuel type')
   if (!STATUSES.has(status)) throw new Error('Choose a valid status')
   if (telegramBodyType && !BODY_TYPES.has(telegramBodyType)) throw new Error('Choose a valid body type')

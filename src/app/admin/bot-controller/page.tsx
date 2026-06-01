@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Vehicle, VehicleBodyType } from '@/lib/fleet'
+import { VEHICLE_BODY_TYPES, VEHICLE_CATEGORIES } from '@/lib/vehicle-taxonomy'
 
 type Settings = {
   botEnabled: boolean
@@ -35,8 +36,8 @@ type BuilderNode = {
 }
 
 const emptySettings: Settings = { botEnabled: true, customerText: {}, adminText: {}, buttonText: {}, customButtons: {} }
-const CATEGORIES = ['Luxury Vehicles', 'Mid Tier Vehicles', 'Large Vehicles'] as const
-const BODY_TYPES: VehicleBodyType[] = ['SUV', 'Sedan', 'Convertible', 'Coupe', 'Hatchback', 'People Mover', 'Van', 'Minibus']
+const CATEGORIES = VEHICLE_CATEGORIES
+const BODY_TYPES: VehicleBodyType[] = [...VEHICLE_BODY_TYPES]
 const STATUS_OPTIONS = ['Available', 'Booked', 'Service'] as const
 const CUSTOM_BUTTON_NODES = ['start', 'class', 'size', 'terms', 'payment'] as const
 const BODY_TYPE_LABELS: Record<Locale, Partial<Record<VehicleBodyType, string>>> = {

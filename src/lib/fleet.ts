@@ -1,7 +1,7 @@
 import { createClient } from './supabase/client'
+import type { VehicleBodyType, VehicleCategory } from './vehicle-taxonomy'
 
-export type VehicleCategory = 'Luxury Vehicles' | 'Mid Tier Vehicles' | 'Large Vehicles'
-export type VehicleBodyType = 'SUV' | 'Sedan' | 'Convertible' | 'Coupe' | 'Hatchback' | 'Van' | 'Minibus' | 'People Mover'
+export type { VehicleBodyType, VehicleCategory } from './vehicle-taxonomy'
 
 export type Car = {
   id: number

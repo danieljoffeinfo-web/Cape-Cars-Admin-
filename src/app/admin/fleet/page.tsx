@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import VehicleModal from '@/components/vehicle-modal'
 import { useAdminLanguage } from '@/app/admin/admin-language'
-import type { Vehicle } from '@/lib/fleet'
+import type { Vehicle, VehicleCategory } from '@/lib/fleet'
 import { getTelegramSegment, type TelegramSegment } from '@/lib/telegram-catalog'
 
 type BlockedRange = {
@@ -34,6 +34,14 @@ const SEGMENT_FILTERS: Array<{ key: 'all' | TelegramSegment; en: string; ru: str
   { key: 'economy', en: 'Economy', ru: 'Эконом' },
 ]
 
+const CATEGORY_FILTERS: Array<{ key: 'all' | VehicleCategory; en: string; ru: string }> = [
+  { key: 'all', en: 'All categories', ru: 'Все категории' },
+  { key: 'Luxury Vehicles', en: 'Luxury Vehicles', ru: 'Люксовые авто' },
+  { key: 'Mid Tier Vehicles', en: 'Mid Tier Vehicles', ru: 'Средний класс' },
+  { key: 'Economy Vehicles', en: 'Economy Vehicles', ru: 'Эконом' },
+  { key: 'Large Vehicles', en: 'Large Vehicles', ru: 'Большие авто' },
+]
+
 export default function FleetAdmin() {
   const { locale, t } = useAdminLanguage()
   const [vehicles, setVehicles] = useState<FleetVehicle[]>([])
@@ -45,6 +53,7 @@ export default function FleetAdmin() {
   const [deletingBookings, setDeletingBookings] = useState(false)
   const [bookingCleanupStatus, setBookingCleanupStatus] = useState<string | null>(null)
   const [segmentFilter, setSegmentFilter] = useState<'all' | TelegramSegment>('all')
+  const [categoryFilter, setCategoryFilter] = useState<'all' | VehicleCategory>('all')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -108,7 +117,11 @@ export default function FleetAdmin() {
 
   const vehicleSegment = (car: FleetVehicle): TelegramSegment => getTelegramSegment(car.model, car.cat)
 
-  const filteredVehicles = vehicles.filter((car) => segmentFilter === 'all' || vehicleSegment(car) === segmentFilter)
+  const filteredVehicles = vehicles.filter((car) => {
+    const matchesSegment = segmentFilter === 'all' || vehicleSegment(car) === segmentFilter
+    const matchesCategory = categoryFilter === 'all' || car.cat === categoryFilter
+    return matchesSegment && matchesCategory
+  })
 
   const available = filteredVehicles.filter(c => effectiveStatus(c) === 'Available').length
   const booked    = filteredVehicles.filter(c => effectiveStatus(c) === 'Booked').length
@@ -212,6 +225,18 @@ export default function FleetAdmin() {
               </button>
             )
           })}
+          <select
+            value={categoryFilter}
+            onChange={(event) => setCategoryFilter(event.target.value as 'all' | VehicleCategory)}
+            className="rounded-full border border-black/[0.08] bg-white px-4 py-2 text-sm text-neutral-600 focus:outline-none focus:ring-2 focus:ring-neutral-300"
+            aria-label={t('Filter by category', 'Фильтр по категории')}
+          >
+            {CATEGORY_FILTERS.map((filter) => (
+              <option key={filter.key} value={filter.key}>
+                {locale === 'ru' ? filter.ru : filter.en}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Summary chips */}

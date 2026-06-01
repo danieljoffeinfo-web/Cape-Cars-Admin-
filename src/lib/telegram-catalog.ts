@@ -1,6 +1,7 @@
-export type VehicleCategory = 'Luxury Vehicles' | 'Mid Tier Vehicles' | 'Large Vehicles'
+import type { VehicleBodyType as TelegramBodyType, VehicleCategory } from './vehicle-taxonomy'
+
+export type { TelegramBodyType, VehicleCategory }
 export type TelegramSegment = 'luxury' | 'mid' | 'economy'
-export type TelegramBodyType = 'SUV' | 'Sedan' | 'Convertible' | 'Coupe' | 'Hatchback' | 'Van' | 'Minibus' | 'People Mover'
 
 export type TelegramCatalogVehicle = {
   id: string
@@ -14,12 +15,14 @@ export type TelegramCatalogVehicle = {
 export const CATEGORY_ORDER: VehicleCategory[] = [
   'Luxury Vehicles',
   'Mid Tier Vehicles',
+  'Economy Vehicles',
   'Large Vehicles',
 ]
 
 export const CATEGORY_PRICING: Record<VehicleCategory, number> = {
   'Luxury Vehicles': 7000,
   'Mid Tier Vehicles': 2000,
+  'Economy Vehicles': 2000,
   'Large Vehicles': 4000,
 }
 
@@ -315,6 +318,8 @@ export function getTelegramSegment(model: string, category?: VehicleCategory | s
   const normalized = model.toLowerCase()
 
   if (category === 'Luxury Vehicles') return 'luxury'
+  if (category === 'Economy Vehicles') return 'economy'
+  if (category === 'Large Vehicles') return 'mid'
   if (/(picanto|jazz|i20)/.test(normalized)) return 'economy'
   return 'mid'
 }

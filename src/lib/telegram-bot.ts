@@ -1458,8 +1458,15 @@ async function handleCallback(callback: CallbackQuery) {
 
     if (session.step === 'awaiting_end_date') {
       const startDate = session.requested_start_date!
+      if (selectedDate <= startDate) {
+        const [yr, mo] = startDate.split('-').map(Number)
+        const keyboard = buildCalendarKeyboard(yr, mo - 1, session.blocked_ranges ?? [], 'end', locale, startDate, config)
+        await sendMessage(chatId, TEXT.calendarEnd[locale](startDate), keyboard)
+        return
+      }
+
       const msPerDay = 1000 * 60 * 60 * 24
-      const days = Math.round((new Date(selectedDate).getTime() - new Date(startDate).getTime()) / msPerDay)
+      const days = Math.max(1, Math.round((new Date(selectedDate).getTime() - new Date(startDate).getTime()) / msPerDay))
       const totalAmount = (session.daily_rate ?? 0) * days
 
       const next = await saveSession(chatId, {

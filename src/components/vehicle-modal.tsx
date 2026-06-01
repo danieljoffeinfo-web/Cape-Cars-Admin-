@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { useAdminLanguage } from '@/app/admin/admin-language'
 import type { Vehicle } from '@/lib/fleet'
+import { VEHICLE_BODY_TYPES, VEHICLE_CATEGORIES } from '@/lib/vehicle-taxonomy'
 
 type ModalProps = {
   vehicle?: Vehicle | null
@@ -10,8 +11,8 @@ type ModalProps = {
   onSaved: () => void
 }
 
-const CATS = ['Luxury Vehicles', 'Mid Tier Vehicles', 'Large Vehicles'] as const
-const BODY_TYPES = ['SUV', 'Sedan', 'Convertible', 'Coupe', 'Hatchback', 'Van', 'Minibus', 'People Mover'] as const
+const CATS = VEHICLE_CATEGORIES
+const BODY_TYPES = VEHICLE_BODY_TYPES
 const FUELS = ['Petrol', 'Hybrid', 'Electric', 'Diesel'] as const
 const STATUSES = ['Available', 'Booked', 'Service'] as const
 
@@ -137,6 +138,7 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
     const labels: Record<string, string> = {
       'Luxury Vehicles': 'Люксовые авто',
       'Mid Tier Vehicles': 'Средний класс',
+      'Economy Vehicles': 'Эконом',
       'Large Vehicles': 'Большие авто',
     }
     return locale === 'ru' ? labels[category] ?? category : category
