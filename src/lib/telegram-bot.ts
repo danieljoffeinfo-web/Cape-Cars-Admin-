@@ -420,6 +420,17 @@ function stepRank(step?: SessionStep | string | null) {
   return index === -1 ? 0 : index
 }
 
+function isPostApprovalDocumentStep(step?: SessionStep | string | null) {
+  return [
+    'awaiting_id_image',
+    'awaiting_license_image',
+    'awaiting_license_back_image',
+    'awaiting_terms_acceptance',
+    'awaiting_payment_proof',
+    'completed',
+  ].includes(step ?? '')
+}
+
 async function restoreSession(chatId: string): Promise<BotSession | null> {
   const booking = await getLatestTelegramBookingForChat(chatId)
   if (!booking) return null
@@ -455,7 +466,8 @@ async function restoreSession(chatId: string): Promise<BotSession | null> {
     if (!booking.id_file_id) return 'awaiting_id_image'
     if (!booking.license_file_id) return 'awaiting_license_image'
     if (!booking.license_back_file_id) return 'awaiting_license_back_image'
-    if (booking.status === 'confirmed_booking') return 'awaiting_payment_proof'
+    if (booking.status === 'documents_pending') return 'awaiting_terms_acceptance'
+    if (booking.status === 'confirmed_booking') return 'awaiting_terms_acceptance'
     if (booking.status === 'awaiting_payment_confirmation') return 'awaiting_payment_proof'
     return 'completed'
   })()
@@ -494,6 +506,20 @@ async function restorePersistedSession(chatId: string): Promise<BotSession | nul
   if (!data || data.chat_id !== chatId || !data.step) return null
 
   const restoredBooking = await restoreSession(chatId)
+
+  if (
+    restoredBooking
+    && restoredBooking.step === 'awaiting_admin_confirmation'
+    && isPostApprovalDocumentStep(data.step)
+  ) {
+    return {
+      ...defaultSession(chatId),
+      ...restoredBooking,
+      ...data,
+      chat_id: chatId,
+      updated_at: record.updated_at ?? data.updated_at ?? restoredBooking.updated_at ?? new Date().toISOString(),
+    }
+  }
 
   if (restoredBooking && stepRank(restoredBooking.step) > stepRank(data.step)) {
     return restoredBooking
@@ -1742,11 +1768,10 @@ async function handleMessage(message: TelegramMessage) {
     })
 
     const config = await getBotControllerConfig()
-    session = await saveSession(chatId, { step: 'awaiting_payment_proof', license_back_file_id: fileId })
+    session = await saveSession(chatId, { step: 'awaiting_terms_acceptance', license_back_file_id: fileId })
     session = (await ensureCustomer(session)) ?? session
-    await persistBooking(session, 'awaiting_payment_confirmation')
-    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'paymentDetailsRu' : 'paymentDetailsEn', TEXT.paymentDetails[locale](session.total_amount)), getPaymentButtons(locale, config))
-    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'paymentProofRu' : 'paymentProofEn', TEXT.paymentProof[locale]))
+    await persistBooking(session, 'confirmed_booking')
+    await sendMessage(chatId, TEXT.bookingConfirmed[locale], getTermsLanguageButtons(config))
     return
   }
 
