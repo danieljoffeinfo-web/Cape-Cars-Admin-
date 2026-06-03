@@ -12,10 +12,7 @@ export const VEHICLE_BODY_TYPES = [
   'Sedan',
   'Convertible',
   'Coupe',
-  'Hatchback',
   'Van',
-  'Minibus',
-  'People Mover',
 ] as const
 
 export type VehicleBodyType = typeof VEHICLE_BODY_TYPES[number]

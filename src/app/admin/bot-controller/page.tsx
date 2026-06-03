@@ -41,8 +41,8 @@ const BODY_TYPES: VehicleBodyType[] = [...VEHICLE_BODY_TYPES]
 const STATUS_OPTIONS = ['Available', 'Booked', 'Service'] as const
 const CUSTOM_BUTTON_NODES = ['start', 'class', 'size', 'terms', 'payment'] as const
 const BODY_TYPE_LABELS: Record<Locale, Partial<Record<VehicleBodyType, string>>> = {
-  en: { SUV: 'SUVs', Sedan: 'Sedans', Convertible: 'Convertibles', Coupe: 'Coupes', Hatchback: 'Hatchbacks', 'People Mover': 'People Movers', Van: 'Vans', Minibus: 'Minibuses' },
-  ru: { SUV: 'Внедорожники', Sedan: 'Седаны', Convertible: 'Кабриолеты', Coupe: 'Купе', Hatchback: 'Хэтчбеки', 'People Mover': 'Минивэны', Van: 'Фургоны', Minibus: 'Микроавтобусы' },
+  en: { SUV: 'SUVs', Sedan: 'Sedans', Convertible: 'Convertibles', Coupe: 'Coupes', Van: 'Vans & Minibuses' },
+  ru: { SUV: 'Внедорожники', Sedan: 'Седаны', Convertible: 'Кабриолеты', Coupe: 'Купе', Van: 'Фургоны и микроавтобусы' },
 }
 const TYPE_LABELS: Record<Locale, Record<BuilderNode['type'], string>> = {
   en: { trigger: 'trigger', question: 'question', message: 'message', action: 'action', handoff: 'handoff' },

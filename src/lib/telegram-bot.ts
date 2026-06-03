@@ -111,7 +111,7 @@ type BotControllerConfig = {
 }
 
 const SEGMENT_ORDER: TelegramSegment[] = ['luxury', 'mid', 'economy']
-const BODY_TYPE_ORDER: TelegramBodyType[] = ['SUV', 'Sedan', 'Convertible', 'Coupe', 'Hatchback', 'People Mover', 'Van', 'Minibus']
+const BODY_TYPE_ORDER: TelegramBodyType[] = ['SUV', 'Sedan', 'Convertible', 'Coupe', 'Van']
 
 const SEGMENT_LABELS: Record<Locale, Record<TelegramSegment, string>> = {
   en: {
@@ -126,27 +126,35 @@ const SEGMENT_LABELS: Record<Locale, Record<TelegramSegment, string>> = {
   },
 }
 
+const SEGMENT_EMOJIS: Record<TelegramSegment, string> = {
+  luxury: '👑',
+  mid: '🚙',
+  economy: '🚗',
+}
+
 const BODY_TYPE_LABELS: Record<Locale, Record<TelegramBodyType, string>> = {
   en: {
     SUV: 'SUVs',
     Sedan: 'Sedans',
     Convertible: 'Convertibles',
     Coupe: 'Coupes',
-    Hatchback: 'Hatchbacks',
-    Van: 'Vans',
-    Minibus: 'Minibuses',
-    'People Mover': 'People Movers',
+    Van: 'Vans & Minibuses',
   },
   ru: {
     SUV: 'SUV',
     Sedan: 'Седаны',
     Convertible: 'Кабриолеты',
     Coupe: 'Купе',
-    Hatchback: 'Хэтчбеки',
-    Van: 'Фургоны',
-    Minibus: 'Микроавтобусы',
-    'People Mover': 'Минивэны',
+    Van: 'Фургоны и микроавтобусы',
   },
+}
+
+const BODY_TYPE_EMOJIS: Record<TelegramBodyType, string> = {
+  SUV: '🚙',
+  Sedan: '🚗',
+  Convertible: '🏎️',
+  Coupe: '🏎️',
+  Van: '🚐',
 }
 
 const MONTH_NAMES: Record<Locale, string[]> = {
@@ -823,7 +831,7 @@ function getPaymentButtons(locale: Locale, config: BotControllerConfig = {}) {
 
 function getCategoryButtons(locale: Locale, config: BotControllerConfig = {}) {
   return [
-    ...SEGMENT_ORDER.map((segment) => [{ text: copy(config, 'buttonText', `${segment}${locale === 'ru' ? 'Ru' : 'En'}`, `✨ ${SEGMENT_LABELS[locale][segment]}`), callback_data: `category:${segment}` }]),
+    ...SEGMENT_ORDER.map((segment) => [{ text: copy(config, 'buttonText', `${segment}${locale === 'ru' ? 'Ru' : 'En'}`, `${SEGMENT_EMOJIS[segment]} ${SEGMENT_LABELS[locale][segment]}`), callback_data: `category:${segment}` }]),
     getTermsButton(locale, config),
     getManagerButton(locale, config),
     getBackButton(locale, 'start', config),
@@ -833,11 +841,21 @@ function getCategoryButtons(locale: Locale, config: BotControllerConfig = {}) {
 
 function getBodyTypeButtons(locale: Locale, bodyTypes: TelegramBodyType[], config: BotControllerConfig = {}) {
   return [
-    ...bodyTypes.map((bodyType) => [{ text: `🚗 ${BODY_TYPE_LABELS[locale][bodyType]}`, callback_data: `body:${bodyType}` }]),
+    ...bodyTypes.map((bodyType) => [{ text: `${BODY_TYPE_EMOJIS[bodyType]} ${BODY_TYPE_LABELS[locale][bodyType]}`, callback_data: `body:${bodyType}` }]),
     getManagerButton(locale, config),
     getBackButton(locale, 'category', config),
     ...customButtonRows(config, 'size', locale),
   ]
+}
+
+function normalizeTelegramBodyType(bodyType: string | null | undefined): TelegramBodyType {
+  if (bodyType === 'SUV' || bodyType === 'Sedan' || bodyType === 'Convertible' || bodyType === 'Coupe' || bodyType === 'Van') {
+    return bodyType
+  }
+
+  if (bodyType === 'Hatchback') return 'Sedan'
+  if (bodyType === 'Minibus' || bodyType === 'People Mover') return 'Van'
+  return 'Sedan'
 }
 
 function getPublicSupabaseClient() {
@@ -854,8 +872,8 @@ async function getPublicVehiclesForCategory(category: VehicleCategory): Promise<
 
     return vehicles.map((vehicle) => {
       const display = getTelegramVehicleDisplay(vehicle.model)
-      const bodyType = vehicle.telegram_body_type && vehicle.telegram_body_type in BODY_TYPE_LABELS.en
-        ? vehicle.telegram_body_type as TelegramBodyType
+      const bodyType = vehicle.telegram_body_type
+        ? normalizeTelegramBodyType(vehicle.telegram_body_type)
         : getTelegramBodyType(vehicle.model)
 
       return {
@@ -923,7 +941,7 @@ async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static', 
       model: display.model,
       bookingModel: vehicle.model,
       category: vehicle.cat as VehicleCategory,
-      bodyType: (vehicle.telegram_body_type as TelegramBodyType | null) ?? getTelegramBodyType(vehicle.model),
+      bodyType: normalizeTelegramBodyType(vehicle.telegram_body_type) ?? getTelegramBodyType(vehicle.model),
       rate: vehicle.rate,
       status: vehicle.status,
       imageUrl: vehicle.image_url || display.imageUrl || '',
@@ -1067,6 +1085,47 @@ async function sendBodyTypePrompt(chatId: string, segment: TelegramSegment, loca
   )
 }
 
+async function sendSegmentVehicleCatalog(chatId: string, segment: TelegramSegment, locale: Locale) {
+  const config = await getBotControllerConfig()
+  const liveVehicles = await getLiveVehiclesForSegment(segment)
+  if (liveVehicles.length === 0) {
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'noVehiclesRu' : 'noVehiclesEn', TEXT.noVehicles[locale]), getCategoryButtons(locale, config))
+    return
+  }
+
+  await sendMessage(chatId, `${SEGMENT_EMOJIS[segment]} ${SEGMENT_LABELS[locale][segment]}`, [getBackButton(locale, 'category', config)])
+
+  for (const vehicle of liveVehicles) {
+    const buttons = [
+      [{ text: TEXT.bookingVehicle[locale](vehicle.model), callback_data: `${vehicle.source === 'db' ? 'bookdb' : 'book'}:${vehicle.id}` }],
+      getBackButton(locale, 'category', config),
+    ]
+    try {
+      if (vehicle.imageUrl) {
+        await sendPhoto(
+          chatId,
+          vehicle.imageUrl,
+          formatVehicleCaption(vehicle, locale),
+          buttons,
+        )
+      } else {
+        await sendMessage(
+          chatId,
+          formatVehicleCaption(vehicle, locale),
+          buttons,
+        )
+      }
+    } catch (error) {
+      console.error('sendPhoto failed for vehicle', vehicle.id, error)
+      await sendMessage(
+        chatId,
+        formatVehicleCaption(vehicle, locale),
+        buttons,
+      )
+    }
+  }
+}
+
 async function sendVehicleCatalog(chatId: string, segment: TelegramSegment, locale: Locale, bodyType: TelegramBodyType) {
   const config = await getBotControllerConfig()
   const liveVehicles = await getLiveVehiclesForSegmentAndBodyType(segment, bodyType)
@@ -1136,7 +1195,7 @@ async function handleCategorySelect(callback: CallbackQuery, category: TelegramS
   await logInboundText(chatId, `Selected segment: ${category}`, 'button')
 
   await saveSession(chatId, {
-    step: 'choosing_body_type',
+    step: category === 'economy' ? 'choosing_vehicle' : 'choosing_body_type',
     selected_segment: category,
     selected_category: null,
     selected_body_type: null,
@@ -1155,6 +1214,11 @@ async function handleCategorySelect(callback: CallbackQuery, category: TelegramS
   })
 
   await answerCallbackQuery(callback.id, SEGMENT_LABELS[locale][category])
+  if (category === 'economy') {
+    await sendSegmentVehicleCatalog(chatId, category, locale)
+    return
+  }
+
   await sendBodyTypePrompt(chatId, category, locale)
 }
 

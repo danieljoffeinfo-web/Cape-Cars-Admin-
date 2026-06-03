@@ -327,14 +327,12 @@ export function getTelegramSegment(model: string, category?: VehicleCategory | s
 export function getTelegramBodyType(model: string): TelegramBodyType {
   const normalized = model.toLowerCase()
 
-  if (/(sprinter|minibus)/.test(normalized)) return 'Minibus'
-  if (/(staria|grand starex|v-class)/.test(normalized)) return 'People Mover'
-  if (/(van)/.test(normalized)) return 'Van'
+  if (/(sprinter|minibus|staria|grand starex|v-class|van)/.test(normalized)) return 'Van'
   if (/(convertible|boxster|cabriolet)/.test(normalized)) return 'Convertible'
   if (/(cayman|coupe|competition)/.test(normalized)) return 'Coupe'
   if (/(sedan|s-class|3 series)/.test(normalized)) return 'Sedan'
   if (/(x3|x5|wrangler|range rover|rav4|evoque|countryman|sportback|suv)/.test(normalized)) return 'SUV'
-  if (/(picanto|jazz|i20)/.test(normalized)) return 'Hatchback'
+  if (/(picanto|jazz|i20)/.test(normalized)) return 'Sedan'
   return 'Sedan'
 }
 

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAdminLanguage } from '../admin-language'
 
+const AUTO_REFRESH_MS = 15000
+
 type TelegramBooking = {
   id: string
   customer_id: string | null
@@ -96,6 +98,7 @@ export default function BookingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false)
   const [deletingAll, setDeletingAll] = useState(false)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -115,10 +118,36 @@ export default function BookingsPage() {
       status: booking.status === 'pre_confirmation' ? 'pending' : booking.status,
     }))
     setBookings(normalized)
+    setLastUpdatedAt(new Date())
     setLoading(false)
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    void load()
+
+    const interval = window.setInterval(() => {
+      void load()
+    }, AUTO_REFRESH_MS)
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void load()
+      }
+    }
+
+    const handleFocus = () => {
+      void load()
+    }
+
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [load])
 
   const updateStatus = async (booking: TelegramBooking, status: string) => {
     setUpdatingId(booking.id)
@@ -213,6 +242,14 @@ export default function BookingsPage() {
         <div>
           <h1 className="text-2xl font-light text-neutral-900">{t('Bookings', 'Бронирования')}</h1>
           <p className="mt-1 text-sm text-neutral-500">{t('Review documents and confirm bookings from the Telegram flow.', 'Проверяйте документы и подтверждайте бронирования из Telegram.')}</p>
+          <p className="mt-1 text-xs text-neutral-400">
+            {lastUpdatedAt
+              ? t(
+                `Auto-refreshing every 15 seconds. Last sync ${lastUpdatedAt.toLocaleTimeString(locale === 'ru' ? 'ru-RU' : 'en-ZA')}.`,
+                `Автообновление каждые 15 секунд. Последняя синхронизация: ${lastUpdatedAt.toLocaleTimeString(locale === 'ru' ? 'ru-RU' : 'en-ZA')}.`,
+              )
+              : t('Auto-refreshing every 15 seconds.', 'Автообновление каждые 15 секунд.')}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {confirmDeleteAll ? (
