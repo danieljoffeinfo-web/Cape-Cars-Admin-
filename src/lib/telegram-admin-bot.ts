@@ -761,6 +761,7 @@ export async function notifyAdminManagerRequest(input: {
   username?: string | null
   customerName?: string | null
   phone?: string | null
+  requestType?: string | null
 }) {
   const adminChatIds = await getAdminSubscriberChatIds()
   if (adminChatIds.length === 0) return
@@ -771,12 +772,13 @@ export async function notifyAdminManagerRequest(input: {
   const summary = [
     'Manager request',
     '',
+    input.requestType ? `Request type: ${input.requestType}` : null,
     `Customer: ${customerLabel}`,
     `Phone: ${input.phone || 'No phone yet'}`,
     `Telegram username: ${input.username ? `@${input.username}` : 'No username'}`,
     `Customer Telegram ID: ${input.chatId}`,
     `Language: ${input.locale === 'ru' ? 'Russian' : 'English'}`,
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 
   await Promise.all(adminChatIds.map((adminChatId) => sendMessage(adminChatId, summary, [
     [{ text: 'Speak to Customer', url: customerChatUrl(input.chatId, input.username || null) }],
@@ -787,7 +789,7 @@ export async function notifyAdminManagerRequest(input: {
     direction: 'outbound',
     messageType: 'text',
     body: marker,
-    meta: { adminChatIds, locale: input.locale },
+    meta: { adminChatIds, locale: input.locale, requestType: input.requestType ?? null },
   })
 }
 

@@ -161,156 +161,162 @@ const DAY_NAMES: Record<Locale, string[]> = {
 
 const TEXT = {
   welcome: {
-    en: '⛰️ Welcome to Cape Cars Rentals. View our available vehicles below.',
-    ru: '⛰️ Добро пожаловать в Cape Cars Rentals. Посмотрите доступные автомобили ниже.',
+    en: '👋 Welcome to Cape Cars Rentals! We’re happy to help. Please choose an option below.',
+    ru: '👋 Добро пожаловать в Cape Cars Rentals! Мы рады помочь. Пожалуйста, выберите вариант ниже.',
   },
   chooseCategory: {
-    en: 'Choose a vehicle class below.',
-    ru: 'Выберите класс автомобиля ниже.',
+    en: '🚗 Please choose a vehicle class below.',
+    ru: '🚗 Пожалуйста, выберите класс автомобиля ниже.',
   },
   categoryIntro: {
-    en: (segment: TelegramSegment) => `${SEGMENT_LABELS.en[segment]} vehicles.`,
-    ru: (segment: TelegramSegment) => `${SEGMENT_LABELS.ru[segment]}.`,
+    en: (segment: TelegramSegment) => `✨ ${SEGMENT_LABELS.en[segment]} vehicles.`,
+    ru: (segment: TelegramSegment) => `✨ ${SEGMENT_LABELS.ru[segment]}.`,
   },
   chooseVehicle: {
-    en: 'Please choose a vehicle from the category list above.',
-    ru: 'Пожалуйста, выберите автомобиль из списка выше.',
+    en: '🚘 Please choose a vehicle from the list above.',
+    ru: '🚘 Пожалуйста, выберите автомобиль из списка выше.',
   },
   chooseBodyType: {
-    en: 'Choose a body type below.',
-    ru: 'Выберите тип кузова ниже.',
+    en: '🧭 Choose a body type below.',
+    ru: '🧭 Выберите тип кузова ниже.',
   },
   bookingVehicle: {
-    en: (model: string) => `Book ${model}`,
-    ru: (model: string) => `Забронировать ${model}`,
+    en: (model: string) => `✅ Book ${model}`,
+    ru: (model: string) => `✅ Забронировать ${model}`,
   },
   calendarStart: {
-    en: (model: string) => `📅 ${model}\n\nSelect your start date.\n• = already booked`,
-    ru: (model: string) => `📅 ${model}\n\nВыберите дату начала аренды.\n• = уже забронировано`,
+    en: (model: string) => `📅 ${model}\n\nPlease select your start date.\n• = already booked`,
+    ru: (model: string) => `📅 ${model}\n\nПожалуйста, выберите дату начала аренды.\n• = уже забронировано`,
   },
   calendarEnd: {
-    en: (startDate: string) => `📅 Start date: ${startDate}\n\nNow select your return date.\n• = already booked`,
-    ru: (startDate: string) => `📅 Дата начала: ${startDate}\n\nВыберите дату возврата.\n• = уже забронировано`,
+    en: (startDate: string) => `📅 Start date: ${startDate}\n\nNow please select your return date.\n• = already booked`,
+    ru: (startDate: string) => `📅 Дата начала: ${startDate}\n\nТеперь, пожалуйста, выберите дату возврата.\n• = уже забронировано`,
   },
   confirmSummary: {
     en: (model: string, dailyRate: number, days: number, totalAmount: number, startDate: string, endDate: string) => [
-      `Daily rate on ${model} is ${formatCurrency(dailyRate)}.`,
-      `For ${days} day${days === 1 ? '' : 's'}, your total is ${formatCurrency(totalAmount)}.`,
+      `🚘 ${model}`,
+      `💵 Daily rate: ${formatCurrency(dailyRate)}.`,
+      `🗓️ For ${days} day${days === 1 ? '' : 's'}, your total is ${formatCurrency(totalAmount)}.`,
       '',
-      `Start date: ${startDate}`,
-      `End date: ${endDate}`,
+      `📍 Start date: ${startDate}`,
+      `📍 End date: ${endDate}`,
       '',
-      'Would you like to confirm, make changes, or view other vehicles?',
+      '😊 Would you like to confirm, make changes, or view other vehicles?',
     ].join('\n'),
     ru: (model: string, dailyRate: number, days: number, totalAmount: number, startDate: string, endDate: string) => [
-      `Дневная ставка на ${model}: ${formatCurrency(dailyRate)}.`,
-      `За ${days} дн. сумма составит ${formatCurrency(totalAmount)}.`,
+      `🚘 ${model}`,
+      `💵 Дневная ставка: ${formatCurrency(dailyRate)}.`,
+      `🗓️ За ${days} дн. сумма составит ${formatCurrency(totalAmount)}.`,
       '',
-      `Дата начала: ${startDate}`,
-      `Дата окончания: ${endDate}`,
+      `📍 Дата начала: ${startDate}`,
+      `📍 Дата окончания: ${endDate}`,
       '',
-      'Подтвердить, изменить данные или посмотреть другие автомобили?',
+      '😊 Подтвердить, изменить данные или посмотреть другие автомобили?',
     ].join('\n'),
   },
   fullName: {
-    en: 'Please send your full name and surname.',
-    ru: 'Пожалуйста, отправьте ваше полное имя и фамилию.',
+    en: '📝 Please send your full name and surname.',
+    ru: '📝 Пожалуйста, отправьте ваше полное имя и фамилию.',
   },
   phone: {
-    en: 'Please send your phone number.',
-    ru: 'Пожалуйста, отправьте ваш номер телефона.',
+    en: '📞 Please send your phone number.',
+    ru: '📞 Пожалуйста, отправьте ваш номер телефона.',
   },
   idPassport: {
-    en: 'Please send a clear image of your ID or passport.',
-    ru: 'Пожалуйста, отправьте чёткое фото вашего ID или паспорта.',
+    en: '🪪 Please send a clear image of your ID or passport.',
+    ru: '🪪 Пожалуйста, отправьте чёткое фото вашего ID или паспорта.',
   },
   license: {
-    en: 'Thanks. Now please send a clear image of the FRONT of your driver’s license.',
-    ru: 'Спасибо. Теперь отправьте чёткое фото ПЕРЕДНЕЙ стороны водительского удостоверения.',
+    en: '🙏 Thanks! Now please send a clear image of the FRONT of your driver’s license.',
+    ru: '🙏 Спасибо! Теперь отправьте чёткое фото ПЕРЕДНЕЙ стороны водительского удостоверения.',
   },
   licenseBack: {
-    en: 'Perfect. Now send a clear image of the BACK of your driver’s license.',
-    ru: 'Отлично. Теперь отправьте чёткое фото ОБРАТНОЙ стороны водительского удостоверения.',
+    en: '👌 Perfect! Now send a clear image of the BACK of your driver’s license.',
+    ru: '👌 Отлично! Теперь отправьте чёткое фото ОБРАТНОЙ стороны водительского удостоверения.',
   },
   done: {
-    en: (bookingCode: string) => `Perfect. Your booking ${bookingCode} is confirmed in the Cape Cars system and the dates are now reserved.\n\nA manager will be in touch shortly.`,
-    ru: (bookingCode: string) => `Отлично. Ваше бронирование ${bookingCode} подтверждено в системе Cape Cars, и даты уже зарезервированы.\n\nМенеджер свяжется с вами в ближайшее время.`,
+    en: (bookingCode: string) => `🎉 Perfect! Your booking ${bookingCode} is confirmed in the Cape Cars system and the dates are now reserved.\n\n🤝 A manager will be in touch shortly.`,
+    ru: (bookingCode: string) => `🎉 Отлично! Ваше бронирование ${bookingCode} подтверждено в системе Cape Cars, и даты уже зарезервированы.\n\n🤝 Менеджер свяжется с вами в ближайшее время.`,
   },
   alreadyCompleted: {
-    en: (bookingCode: string) => `Your booking ${bookingCode} is already locked in Cape Cars and those dates are reserved. Send /start only if you want to begin a new booking.`,
-    ru: (bookingCode: string) => `Ваше бронирование ${bookingCode} уже зафиксировано в Cape Cars, и эти даты зарезервированы. Отправьте /start, только если хотите начать новое бронирование.`,
+    en: (bookingCode: string) => `✅ Your booking ${bookingCode} is already locked in Cape Cars and those dates are reserved. Send /start only if you want to begin a new booking.`,
+    ru: (bookingCode: string) => `✅ Ваше бронирование ${bookingCode} уже зафиксировано в Cape Cars, и эти даты зарезервированы. Отправьте /start, только если хотите начать новое бронирование.`,
   },
   vehicleNotFound: {
-    en: 'Vehicle not found',
-    ru: 'Автомобиль не найден',
+    en: '⚠️ Vehicle not found',
+    ru: '⚠️ Автомобиль не найден',
   },
   noVehicles: {
-    en: 'There are no vehicles in this category right now.',
-    ru: 'Сейчас в этой категории нет автомобилей.',
+    en: '😔 There are no vehicles in this category right now.',
+    ru: '😔 Сейчас в этой категории нет автомобилей.',
+  },
+  airportTransfer: {
+    en: '✈️ Airport transfers are done in high class vehicles such as our Mercedes S-Class and a few other options. Our manager will be in touch with you shortly regarding that.',
+    ru: '✈️ Трансферы из аэропорта выполняются на автомобилях высокого класса, таких как наш Mercedes S-Class, а также на нескольких других вариантах. Наш менеджер свяжется с вами в ближайшее время по этому поводу.',
   },
   bookingConfirmed: {
-    en: '✅ Booking confirmed. Choose your language below to review the rental terms.',
-    ru: '✅ Бронирование подтверждено. Выберите язык ниже, чтобы посмотреть условия аренды.',
+    en: '✅ Booking confirmed! Please choose your language below to review the rental terms.',
+    ru: '✅ Бронирование подтверждено! Пожалуйста, выберите язык ниже, чтобы посмотреть условия аренды.',
   },
   termsDocumentCaption: {
-    en: 'Cape Cars rental terms. Read the document, then tap Accept below.',
-    ru: 'Условия аренды Cape Cars. Прочитайте документ и нажмите «Принять» ниже.',
+    en: '📄 Cape Cars rental terms. Please read the document, then tap Accept below.',
+    ru: '📄 Условия аренды Cape Cars. Пожалуйста, прочитайте документ и нажмите «Принять» ниже.',
   },
   termsDocumentViewCaption: {
-    en: 'Cape Cars rental terms and conditions are attached.',
-    ru: 'Условия аренды Cape Cars прикреплены.',
+    en: '📄 Cape Cars rental terms and conditions are attached.',
+    ru: '📄 Условия аренды Cape Cars прикреплены.',
   },
   termsAcceptanceReminder: {
-    en: 'Please read and accept the rental terms above before payment details are sent.',
-    ru: 'Пожалуйста, прочитайте и примите условия аренды выше, после этого мы отправим реквизиты для оплаты.',
+    en: '📌 Please read and accept the rental terms above before payment details are sent.',
+    ru: '📌 Пожалуйста, прочитайте и примите условия аренды выше, после этого мы отправим реквизиты для оплаты.',
   },
   managerRequested: {
-    en: 'A manager has been notified and will reach out shortly. You can also continue browsing vehicles below.',
-    ru: 'Менеджер уже уведомлён и скоро свяжется с вами. Вы также можете продолжить просмотр автомобилей ниже.',
+    en: '🤝 A manager has been notified and will reach out shortly. You can also continue browsing vehicles below.',
+    ru: '🤝 Менеджер уже уведомлён и скоро свяжется с вами. Вы также можете продолжить просмотр автомобилей ниже.',
   },
   paymentDetails: {
     en: (totalAmount?: number | null) => [
-      'PAYMENT DETAILS',
+      '💳 PAYMENT DETAILS',
       '',
       '+7-999-217-03-12',
       'Евгений Н.',
       'Альфа-Банк / Сбербанк / Т-Банк',
       '',
-      'Deposit due now: 5000 RUB to secure the booking.',
+      '🔒 Deposit due now: 5000 RUB to secure the booking.',
       totalAmount ? `Rental total: ${formatCurrency(totalAmount)}.` : null,
-      'The remaining rental balance is due upfront on collection, before the vehicle is released.',
+      '🚗 The remaining rental balance is due upfront on collection, before the vehicle is released.',
       '',
-      'Please send proof of payment after payment.',
+      '📤 Please send proof of payment after payment.',
     ].filter(Boolean).join('\n'),
     ru: (totalAmount?: number | null) => [
-      'РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ',
+      '💳 РЕКВИЗИТЫ ДЛЯ ОПЛАТЫ',
       '',
       '+7-999-217-03-12',
       'Евгений Н.',
       'Альфа-Банк / Сбербанк / Т-Банк',
       '',
-      'Предоплата сейчас: 5000 ₽ для закрепления бронирования.',
+      '🔒 Предоплата сейчас: 5000 ₽ для закрепления бронирования.',
       totalAmount ? `Итоговая сумма аренды: ${formatCurrency(totalAmount)}.` : null,
-      'Оставшаяся сумма аренды оплачивается полностью при получении автомобиля, до передачи ключей.',
+      '🚗 Оставшаяся сумма аренды оплачивается полностью при получении автомобиля, до передачи ключей.',
       '',
-      'Пожалуйста, отправьте подтверждение оплаты после перевода.',
+      '📤 Пожалуйста, отправьте подтверждение оплаты после перевода.',
     ].filter(Boolean).join('\n'),
   },
   cashPayment: {
-    en: 'Cash payment selected. A manager will be in touch shortly.',
-    ru: 'Выбрана оплата наличными. Менеджер свяжется с вами в ближайшее время.',
+    en: '💵 Cash payment selected. A manager will be in touch shortly.',
+    ru: '💵 Выбрана оплата наличными. Менеджер свяжется с вами в ближайшее время.',
   },
   paymentProof: {
-    en: 'Please send a screenshot or photo of your payment confirmation here.',
-    ru: 'Пожалуйста, отправьте сюда скриншот или фото подтверждения оплаты.',
+    en: '📸 Please send a screenshot or photo of your payment confirmation here.',
+    ru: '📸 Пожалуйста, отправьте сюда скриншот или фото подтверждения оплаты.',
   },
   paymentProofReceived: {
-    en: '✅ Payment proof received. Cape Cars admin has been notified and will confirm shortly.\n\nA manager will be in touch shortly.',
-    ru: '✅ Подтверждение оплаты получено. Администратор Cape Cars уведомлён и скоро подтвердит оплату.\n\nМенеджер свяжется с вами в ближайшее время.',
+    en: '✅ Payment proof received. Cape Cars admin has been notified and will confirm shortly.\n\n🤝 A manager will be in touch shortly.',
+    ru: '✅ Подтверждение оплаты получено. Администратор Cape Cars уведомлён и скоро подтвердит оплату.\n\n🤝 Менеджер свяжется с вами в ближайшее время.',
   },
   awaitingAdminApproval: {
-    en: 'Thanks. Your booking request has been sent to Cape Cars admin for availability confirmation.\n\nAs soon as the vehicle and dates are confirmed, we will ask for your passport/ID and driver’s license photos.',
-    ru: 'Спасибо. Ваш запрос на бронирование отправлен администратору Cape Cars для подтверждения доступности.\n\nКак только автомобиль и даты будут подтверждены, мы попросим фото паспорта/ID и водительского удостоверения.',
+    en: '🕐 Thanks! Your booking request has been sent to Cape Cars admin for availability confirmation.\n\nAs soon as the vehicle and dates are confirmed, we will ask for your passport/ID and driver’s license photos.',
+    ru: '🕐 Спасибо! Ваш запрос на бронирование отправлен администратору Cape Cars для подтверждения доступности.\n\nКак только автомобиль и даты будут подтверждены, мы попросим фото паспорта/ID и водительского удостоверения.',
   },
 } as const
 
@@ -734,16 +740,20 @@ function termsPdfUrl(locale: Locale) {
 function getLanguageButtons(config: BotControllerConfig = {}) {
   return [
     [
-      { text: copy(config, 'buttonText', 'languageEnglish', 'View vehicles'), callback_data: 'lang:en' },
-      { text: copy(config, 'buttonText', 'languageRussian', 'Посмотреть автомобили'), callback_data: 'lang:ru' },
+      { text: copy(config, 'buttonText', 'languageEnglish', '🚘 View vehicles'), callback_data: 'lang:en' },
+      { text: copy(config, 'buttonText', 'languageRussian', '🚘 Посмотреть автомобили'), callback_data: 'lang:ru' },
     ],
     [
-      { text: copy(config, 'buttonText', 'managerEn', 'Speak to manager'), callback_data: 'manager_request:en' },
-      { text: copy(config, 'buttonText', 'managerRu', 'Связаться с менеджером'), callback_data: 'manager_request:ru' },
+      { text: copy(config, 'buttonText', 'managerEn', '💬 Speak to manager'), callback_data: 'manager_request:en' },
+      { text: copy(config, 'buttonText', 'managerRu', '💬 Связаться с менеджером'), callback_data: 'manager_request:ru' },
     ],
     [
-      { text: copy(config, 'buttonText', 'termsEn', 'Terms and Conditions'), callback_data: 'terms_view:en' },
-      { text: copy(config, 'buttonText', 'termsRu', 'Условия аренды'), callback_data: 'terms_view:ru' },
+      { text: copy(config, 'buttonText', 'airportTransferEn', '✈️ Airport transfer'), callback_data: 'airport_transfer:en' },
+      { text: copy(config, 'buttonText', 'airportTransferRu', '✈️ Трансфер из аэропорта'), callback_data: 'airport_transfer:ru' },
+    ],
+    [
+      { text: copy(config, 'buttonText', 'termsEn', '📄 Terms and Conditions'), callback_data: 'terms_view:en' },
+      { text: copy(config, 'buttonText', 'termsRu', '📄 Условия аренды'), callback_data: 'terms_view:ru' },
     ],
     [
       { text: copy(config, 'buttonText', 'location', '📍 Location / Локация'), url: CAPE_CARS_LOCATION_URL },
@@ -757,26 +767,26 @@ function getLanguageButtons(config: BotControllerConfig = {}) {
 
 function getTermsLanguageButtons(config: BotControllerConfig = {}) {
   return [[
-    { text: copy(config, 'buttonText', 'termsEnglish', 'English'), callback_data: 'terms:en' },
-    { text: copy(config, 'buttonText', 'termsRussian', 'Русский'), callback_data: 'terms:ru' },
+    { text: copy(config, 'buttonText', 'termsEnglish', '🇬🇧 English'), callback_data: 'terms:en' },
+    { text: copy(config, 'buttonText', 'termsRussian', '🇷🇺 Русский'), callback_data: 'terms:ru' },
   ]]
 }
 
 function getManagerButton(locale: Locale, config: BotControllerConfig = {}): TelegramInlineButton[] {
-  return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'managerRu' : 'managerEn', locale === 'ru' ? 'Связаться с менеджером' : 'Speak to manager'), callback_data: 'manager_request' }]
+  return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'managerRu' : 'managerEn', locale === 'ru' ? '💬 Связаться с менеджером' : '💬 Speak to manager'), callback_data: 'manager_request' }]
 }
 
 function getTermsButton(locale: Locale, config: BotControllerConfig = {}): TelegramInlineButton[] {
-  return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'termsRu' : 'termsEn', locale === 'ru' ? 'Условия аренды' : 'Terms and Conditions'), callback_data: 'terms_view' }]
+  return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'termsRu' : 'termsEn', locale === 'ru' ? '📄 Условия аренды' : '📄 Terms and Conditions'), callback_data: 'terms_view' }]
 }
 
 function getBackButton(locale: Locale, target: 'start' | 'category' | 'body_types' | 'vehicles' | 'dates', config: BotControllerConfig = {}): TelegramInlineButton[] {
-  return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'backRu' : 'backEn', locale === 'ru' ? 'Назад' : 'Go back'), callback_data: `back:${target}` }]
+  return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'backRu' : 'backEn', locale === 'ru' ? '⬅️ Назад' : '⬅️ Go back'), callback_data: `back:${target}` }]
 }
 
 function getTermsAcceptButtons(locale: Locale, config: BotControllerConfig = {}) {
   return [
-    [{ text: copy(config, 'buttonText', locale === 'ru' ? 'acceptRu' : 'acceptEn', locale === 'ru' ? 'Принять' : 'Accept'), callback_data: `terms_accept:${locale}` }],
+    [{ text: copy(config, 'buttonText', locale === 'ru' ? 'acceptRu' : 'acceptEn', locale === 'ru' ? '✅ Принять' : '✅ Accept'), callback_data: `terms_accept:${locale}` }],
     getBackButton(locale, 'category', config),
     ...customButtonRows(config, 'terms', locale),
   ]
@@ -791,7 +801,7 @@ function getPaymentButtons(locale: Locale, config: BotControllerConfig = {}) {
 
 function getCategoryButtons(locale: Locale, config: BotControllerConfig = {}) {
   return [
-    ...SEGMENT_ORDER.map((segment) => [{ text: copy(config, 'buttonText', `${segment}${locale === 'ru' ? 'Ru' : 'En'}`, SEGMENT_LABELS[locale][segment]), callback_data: `category:${segment}` }]),
+    ...SEGMENT_ORDER.map((segment) => [{ text: copy(config, 'buttonText', `${segment}${locale === 'ru' ? 'Ru' : 'En'}`, `✨ ${SEGMENT_LABELS[locale][segment]}`), callback_data: `category:${segment}` }]),
     getTermsButton(locale, config),
     getManagerButton(locale, config),
     getBackButton(locale, 'start', config),
@@ -801,7 +811,7 @@ function getCategoryButtons(locale: Locale, config: BotControllerConfig = {}) {
 
 function getBodyTypeButtons(locale: Locale, bodyTypes: TelegramBodyType[], config: BotControllerConfig = {}) {
   return [
-    ...bodyTypes.map((bodyType) => [{ text: BODY_TYPE_LABELS[locale][bodyType], callback_data: `body:${bodyType}` }]),
+    ...bodyTypes.map((bodyType) => [{ text: `🚗 ${BODY_TYPE_LABELS[locale][bodyType]}`, callback_data: `body:${bodyType}` }]),
     getManagerButton(locale, config),
     getBackButton(locale, 'category', config),
     ...customButtonRows(config, 'size', locale),
@@ -926,8 +936,8 @@ function formatVehicleCaption(vehicle: VehicleChoice, locale: Locale) {
   const segment = getTelegramSegment(vehicle.bookingModel, vehicle.category)
   return [
     `🚘 ${vehicle.model}`,
-    `${SEGMENT_LABELS[locale][segment]} • ${BODY_TYPE_LABELS[locale][vehicle.bodyType]}`,
-    locale === 'ru' ? `Ставка в день: ${formatCurrency(vehicle.rate)}` : `Daily rate: ${formatCurrency(vehicle.rate)}`,
+    `✨ ${SEGMENT_LABELS[locale][segment]} • ${BODY_TYPE_LABELS[locale][vehicle.bodyType]}`,
+    locale === 'ru' ? `💵 Ставка в день: ${formatCurrency(vehicle.rate)}` : `💵 Daily rate: ${formatCurrency(vehicle.rate)}`,
   ].join('\n')
 }
 
@@ -1355,6 +1365,29 @@ async function handleCallback(callback: CallbackQuery) {
     return
   }
 
+  if (data.startsWith('airport_transfer:')) {
+    locale = data.replace('airport_transfer:', '') as Locale
+    session = await saveSession(chatId, {
+      locale,
+      telegram_name: session.telegram_name ?? formatTelegramName(callback.from),
+      telegram_username: session.telegram_username ?? callback.from?.username ?? null,
+    })
+    session = (await ensureCustomer(session)) ?? session
+    const config = await getBotControllerConfig()
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Трансфер из аэропорта' : 'Airport transfer')
+    await notifyAdminManagerRequest({
+      chatId,
+      locale,
+      telegramName: session.telegram_name ?? formatTelegramName(callback.from),
+      username: callback.from?.username ?? session.telegram_username ?? null,
+      customerName: session.customer_full_name ?? null,
+      phone: session.customer_phone ?? null,
+      requestType: locale === 'ru' ? 'Запрос на трансфер из аэропорта' : 'Airport transfer request',
+    })
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'airportTransferRu' : 'airportTransferEn', TEXT.airportTransfer[locale]), getCategoryButtons(locale, config))
+    return
+  }
+
   if (data === 'manager_request' || data.startsWith('manager_request:')) {
     if (data.startsWith('manager_request:')) {
       locale = data.replace('manager_request:', '') as Locale
@@ -1374,6 +1407,7 @@ async function handleCallback(callback: CallbackQuery) {
       username: callback.from?.username ?? session.telegram_username ?? null,
       customerName: session.customer_full_name ?? null,
       phone: session.customer_phone ?? null,
+      requestType: locale === 'ru' ? 'Общий запрос менеджеру' : 'General manager request',
     })
     await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'managerRequestedRu' : 'managerRequestedEn', TEXT.managerRequested[locale]), getCategoryButtons(locale, config))
     return
@@ -1488,9 +1522,9 @@ async function handleCallback(callback: CallbackQuery) {
           selectedDate,
         ),
         [
-          [{ text: locale === 'ru' ? 'Подтвердить' : 'Confirm', callback_data: 'confirm_booking' }],
-          [{ text: locale === 'ru' ? 'Изменить даты' : 'Change dates', callback_data: 'change_booking' }],
-          [{ text: locale === 'ru' ? 'Другие автомобили' : 'View other vehicles', callback_data: 'view_other_vehicles' }],
+          [{ text: locale === 'ru' ? '✅ Подтвердить' : '✅ Confirm', callback_data: 'confirm_booking' }],
+          [{ text: locale === 'ru' ? '📅 Изменить даты' : '📅 Change dates', callback_data: 'change_booking' }],
+          [{ text: locale === 'ru' ? '🚘 Другие автомобили' : '🚘 View other vehicles', callback_data: 'view_other_vehicles' }],
           getBackButton(locale, 'dates', config),
         ],
       )
