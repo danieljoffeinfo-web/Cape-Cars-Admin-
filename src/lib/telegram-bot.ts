@@ -653,11 +653,12 @@ async function telegramApi(method: string, payload: Record<string, unknown>) {
 
 async function sendMessage(chatId: string, text: string, buttons?: TelegramInlineButton[][]) {
   const session = getCachedSession(chatId) ?? await getSession(chatId)
+  const inlineKeyboard = withMainMenuButton(buttons, session.locale)
   try {
     await telegramApi('sendMessage', {
       chat_id: chatId,
       text,
-      reply_markup: buttons ? { inline_keyboard: buttons } : undefined,
+      reply_markup: inlineKeyboard ? { inline_keyboard: inlineKeyboard } : undefined,
     })
   } catch (error) {
     console.error('sendMessage failed', { chatId, error })
@@ -669,7 +670,7 @@ async function sendMessage(chatId: string, text: string, buttons?: TelegramInlin
     direction: 'outbound',
     messageType: 'text',
     body: text,
-    meta: buttons ? { buttons } : null,
+    meta: inlineKeyboard ? { buttons: inlineKeyboard } : null,
   })
 }
 
@@ -688,11 +689,12 @@ async function editMessage(chatId: string, messageId: number, text: string, butt
 
 async function sendPhoto(chatId: string, photo: string, caption: string, buttons?: TelegramInlineButton[][]) {
   const session = getCachedSession(chatId) ?? await getSession(chatId)
+  const inlineKeyboard = withMainMenuButton(buttons, session.locale)
   await telegramApi('sendPhoto', {
     chat_id: chatId,
     photo,
     caption,
-    reply_markup: buttons ? { inline_keyboard: buttons } : undefined,
+    reply_markup: inlineKeyboard ? { inline_keyboard: inlineKeyboard } : undefined,
   })
   await logTelegramConversation({
     chatId,
@@ -700,17 +702,18 @@ async function sendPhoto(chatId: string, photo: string, caption: string, buttons
     direction: 'outbound',
     messageType: 'photo',
     body: caption,
-    meta: { photo, buttons: buttons ?? null },
+    meta: { photo, buttons: inlineKeyboard ?? null },
   })
 }
 
 async function sendDocument(chatId: string, document: string, caption: string, buttons?: TelegramInlineButton[][]) {
   const session = getCachedSession(chatId) ?? await getSession(chatId)
+  const inlineKeyboard = withMainMenuButton(buttons, session.locale)
   await telegramApi('sendDocument', {
     chat_id: chatId,
     document,
     caption,
-    reply_markup: buttons ? { inline_keyboard: buttons } : undefined,
+    reply_markup: inlineKeyboard ? { inline_keyboard: inlineKeyboard } : undefined,
   })
   await logTelegramConversation({
     chatId,
@@ -718,7 +721,7 @@ async function sendDocument(chatId: string, document: string, caption: string, b
     direction: 'outbound',
     messageType: 'document',
     body: caption,
-    meta: { document, buttons: buttons ?? null },
+    meta: { document, buttons: inlineKeyboard ?? null },
   })
 }
 
@@ -780,7 +783,26 @@ function getTermsButton(locale: Locale, config: BotControllerConfig = {}): Teleg
   return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'termsRu' : 'termsEn', locale === 'ru' ? '📄 Условия аренды' : '📄 Terms and Conditions'), callback_data: 'terms_view' }]
 }
 
+function getMainMenuButton(locale: Locale, config: BotControllerConfig = {}): TelegramInlineButton[] {
+  return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'mainMenuRu' : 'mainMenuEn', locale === 'ru' ? '🏠 Назад в главное меню' : '🏠 Back to Main Menu'), callback_data: 'back:start' }]
+}
+
+function withMainMenuButton(buttons: TelegramInlineButton[][] | undefined, locale: Locale | null | undefined, config: BotControllerConfig = {}) {
+  if (!locale) return buttons
+
+  const keyboard = buttons ? buttons.map((row) => [...row]) : []
+  const alreadyHasMainMenu = keyboard.some((row) => row.some((button) => button.callback_data === 'back:start'))
+
+  if (alreadyHasMainMenu) return keyboard
+
+  return [...keyboard, getMainMenuButton(locale, config)]
+}
+
 function getBackButton(locale: Locale, target: 'start' | 'category' | 'body_types' | 'vehicles' | 'dates', config: BotControllerConfig = {}): TelegramInlineButton[] {
+  if (target === 'start') {
+    return getMainMenuButton(locale, config)
+  }
+
   return [{ text: copy(config, 'buttonText', locale === 'ru' ? 'backRu' : 'backEn', locale === 'ru' ? '⬅️ Назад' : '⬅️ Go back'), callback_data: `back:${target}` }]
 }
 
@@ -1384,7 +1406,7 @@ async function handleCallback(callback: CallbackQuery) {
       phone: session.customer_phone ?? null,
       requestType: locale === 'ru' ? 'Запрос на трансфер из аэропорта' : 'Airport transfer request',
     })
-    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'airportTransferRu' : 'airportTransferEn', TEXT.airportTransfer[locale]), getCategoryButtons(locale, config))
+    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'airportTransferRu' : 'airportTransferEn', TEXT.airportTransfer[locale]), [getBackButton(locale, 'start', config)])
     return
   }
 
