@@ -149,13 +149,13 @@ export default function BookingsPage() {
     }
   }, [load])
 
-  const updateStatus = async (booking: TelegramBooking, status: string) => {
+  const updateStatus = async (booking: TelegramBooking, status: string, options?: { notifyUnavailable?: boolean }) => {
     setUpdatingId(booking.id)
     setError(null)
     const response = await fetch(`/api/admin/telegram/bookings/${booking.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, notifyUnavailable: options?.notifyUnavailable === true }),
     })
     const payload = await response.json()
 
@@ -467,6 +467,13 @@ export default function BookingsPage() {
                           </button>
                           <button
                             disabled={updatingId === booking.id || booking.status === 'cancelled'}
+                            onClick={() => updateStatus(booking, 'cancelled', { notifyUnavailable: true })}
+                            className="px-3 py-3 rounded-xl bg-white border border-amber-300 text-amber-700 text-sm disabled:opacity-40"
+                          >
+                            {t("Don't confirm", 'Не подтверждать')}
+                          </button>
+                          <button
+                            disabled={updatingId === booking.id || booking.status === 'cancelled'}
                             onClick={() => updateStatus(booking, 'cancelled')}
                             className="px-3 py-3 rounded-xl bg-white border border-red-200 text-red-600 text-sm disabled:opacity-40"
                           >
@@ -551,6 +558,13 @@ export default function BookingsPage() {
                                       className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs disabled:opacity-40"
                                     >
                                       {t('Confirmed', 'Подтверждено')}
+                                    </button>
+                                    <button
+                                      disabled={updatingId === booking.id || booking.status === 'cancelled'}
+                                      onClick={(event) => { event.stopPropagation(); updateStatus(booking, 'cancelled', { notifyUnavailable: true }) }}
+                                      className="px-3 py-2 rounded-xl bg-white border border-amber-300 text-amber-700 text-xs disabled:opacity-40"
+                                    >
+                                      {t("Don't confirm", 'Не подтверждать')}
                                     </button>
                                     <button
                                       disabled={updatingId === booking.id || booking.status === 'cancelled'}

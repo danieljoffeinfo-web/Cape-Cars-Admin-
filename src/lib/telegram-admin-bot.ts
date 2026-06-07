@@ -403,6 +403,27 @@ async function sendCustomerBookingConfirmed(booking: TelegramBookingWithCustomer
   })
 }
 
+export async function sendCustomerBookingUnavailable(booking: TelegramBookingWithCustomer) {
+  const persisted = await getTelegramSession<CustomerSessionData>(booking.chat_id)
+  const previousSession = persisted?.session_data ?? null
+  const locale = customerLocale(previousSession?.locale)
+
+  await upsertTelegramSession({
+    ...(previousSession ?? {}),
+    chat_id: booking.chat_id,
+    step: 'home',
+    locale,
+    booking_id: null,
+  })
+
+  await customerTelegramApi('sendMessage', {
+    chat_id: booking.chat_id,
+    text: locale === 'ru'
+      ? 'К сожалению, автомобиль недоступен на выбранные вами даты. Менеджер свяжется с вами в ближайшее время.'
+      : 'Unfortunately, the vehicle isn’t available for the dates you selected. The manager will be in touch with you shortly.',
+  })
+}
+
 function customerChatButtonRow(_chatId: string, username?: string | null): InlineButton[] | null {
   if (!username) return null
   return [{ text: 'Speak to Customer', url: `https://t.me/${username}` }]
@@ -416,6 +437,7 @@ function bookingActionButtons(booking: TelegramBookingWithCustomer) {
 
   if (['draft', 'quote_ready', 'customer_details_pending', 'documents_pending', 'pending'].includes(booking.status)) {
     rows.push([{ text: 'Confirmed Booking', callback_data: `admin:booking_confirm:${booking.id}` }])
+    rows.push([{ text: "Don't Confirm", callback_data: `admin:booking_decline:${booking.id}` }])
   }
 
   return rows
@@ -455,7 +477,7 @@ async function sendBookingSummary(
   }
 }
 
-async function handleBookingAction(chatId: string, callbackId: string, bookingId: string, action: 'confirm' | 'paid') {
+async function handleBookingAction(chatId: string, callbackId: string, bookingId: string, action: 'confirm' | 'decline' | 'paid') {
   const booking = await getTelegramBookingById(bookingId)
   if (!booking) {
     await answerCallbackQuery(callbackId, 'Booking not found')
@@ -493,6 +515,30 @@ async function handleBookingAction(chatId: string, callbackId: string, bookingId
 
     await answerCallbackQuery(callbackId, 'Booking confirmed')
     await sendBookingSummary(chatId, updated, 'Booking confirmed')
+    return
+  }
+
+  if (action === 'decline') {
+    if (['cancelled', 'expired'].includes(booking.status)) {
+      await answerCallbackQuery(callbackId, 'Booking already closed')
+      await sendBookingSummary(chatId, booking, 'Booking already closed')
+      return
+    }
+
+    const updated = await updateTelegramBookingStatus(bookingId, 'cancelled')
+    if (!updated) {
+      await answerCallbackQuery(callbackId, 'Could not decline booking')
+      return
+    }
+
+    try {
+      await sendCustomerBookingUnavailable(updated)
+    } catch (error) {
+      console.error('sendCustomerBookingUnavailable failed', error)
+    }
+
+    await answerCallbackQuery(callbackId, 'Booking declined')
+    await sendBookingSummary(chatId, updated, 'Booking declined')
     return
   }
 
@@ -669,6 +715,11 @@ async function handleCallback(callback: CallbackQuery) {
 
   if (data.startsWith('admin:booking_confirm:')) {
     await handleBookingAction(chatId, callback.id, data.replace('admin:booking_confirm:', ''), 'confirm')
+    return
+  }
+
+  if (data.startsWith('admin:booking_decline:')) {
+    await handleBookingAction(chatId, callback.id, data.replace('admin:booking_decline:', ''), 'decline')
     return
   }
 
@@ -851,6 +902,7 @@ export async function notifyAdminNewBooking(input: {
   const buttons = [
     ...(contactRow ? [contactRow] : []),
     [{ text: 'Confirmed Booking', callback_data: `admin:booking_confirm:${input.bookingId}` }],
+    [{ text: "Don't Confirm", callback_data: `admin:booking_decline:${input.bookingId}` }],
   ]
 
   await Promise.all(adminChatIds.map(async (adminChatId) => {
@@ -1018,6 +1070,7 @@ export async function notifyAdminCashPayment(input: {
   const buttons = [
     ...(contactRow ? [contactRow] : []),
     [{ text: 'Confirmed Booking', callback_data: `admin:booking_confirm:${input.bookingId}` }],
+    [{ text: "Don't Confirm", callback_data: `admin:booking_decline:${input.bookingId}` }],
   ]
 
   await Promise.all(adminChatIds.map((adminChatId) => sendMessage(adminChatId, summary, buttons)))

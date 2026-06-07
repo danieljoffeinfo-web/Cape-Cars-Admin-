@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getTelegramBookingById, syncTelegramBookingToRental, updateTelegramBookingStatus } from '@/lib/telegram-admin'
+import { sendCustomerBookingUnavailable } from '@/lib/telegram-admin-bot'
 
 export const runtime = 'nodejs'
 
@@ -11,6 +12,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { bookin
     const bookingId = params.bookingId
     const body = await request.json()
     const status = typeof body?.status === 'string' ? body.status : ''
+    const notifyUnavailable = body?.notifyUnavailable === true
 
     if (!ALLOWED_STATUSES.has(status)) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
@@ -35,6 +37,17 @@ export async function PATCH(request: NextRequest, { params }: { params: { bookin
       if (!rentalSync.ok) {
         await updateTelegramBookingStatus(bookingId, current.status)
         return NextResponse.json({ error: rentalSync.error }, { status: 409 })
+      }
+    }
+
+    if (status === 'cancelled' && notifyUnavailable) {
+      try {
+        await sendCustomerBookingUnavailable(updated)
+      } catch (error) {
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : 'Failed to notify customer' },
+          { status: 502 },
+        )
       }
     }
 
