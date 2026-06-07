@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { createClient } from '@supabase/supabase-js'
 import { CATEGORY_ORDER, TELEGRAM_CATALOG, getTelegramBodyType, getTelegramSegment, getTelegramVehicleDisplay, type TelegramBodyType, type TelegramSegment, type VehicleCategory } from '@/lib/telegram-catalog'
 import { buildTelegramProxyUrl, getLatestTelegramBookingForChat, getTelegramSession, getVehicleById, getVehiclesForCustomerCategory, logTelegramConversation, publicBaseUrl, type VehicleBlockedRange, upsertTelegramBooking, upsertTelegramCustomer, upsertTelegramSession } from '@/lib/telegram-admin'
-import { notifyAdminCashPayment, notifyAdminManagerRequest, notifyAdminNewBooking, notifyAdminPaymentProof } from '@/lib/telegram-admin-bot'
+import { notifyAdminCashPayment, notifyAdminDocumentUpload, notifyAdminManagerRequest, notifyAdminNewBooking, notifyAdminPaymentProof } from '@/lib/telegram-admin-bot'
 
 type Locale = 'en' | 'ru'
 
@@ -1663,6 +1663,9 @@ async function handleCallback(callback: CallbackQuery) {
     next = (await ensureCustomer(next)) ?? next
     await persistBooking(next, 'pending')
 
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Подтверждено' : 'Confirmed')
+    await sendMessage(chatId, TEXT.awaitingAdminApproval[locale])
+
     try {
       await notifyAdminNewBooking({
         bookingId: next.booking_id ?? '',
@@ -1680,9 +1683,6 @@ async function handleCallback(callback: CallbackQuery) {
     } catch (error) {
       console.error('notifyAdminNewBooking failed', error)
     }
-
-    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Подтверждено' : 'Confirmed')
-    await sendMessage(chatId, TEXT.awaitingAdminApproval[locale])
     return
   }
 
@@ -1867,6 +1867,16 @@ async function handleMessage(message: TelegramMessage) {
 
     session = await saveSession(chatId, { step: 'awaiting_license_image', id_file_id: fileId })
     await persistBooking(session, 'documents_pending')
+    try {
+      await notifyAdminDocumentUpload({
+        bookingId: session.booking_id ?? '',
+        chatId,
+        fileId,
+        documentKind: 'id_passport',
+      })
+    } catch (error) {
+      console.error('notifyAdminDocumentUpload failed for id/passport', error)
+    }
     await sendMessage(chatId, TEXT.license[locale])
     return
   }
@@ -1890,6 +1900,16 @@ async function handleMessage(message: TelegramMessage) {
     session = await saveSession(chatId, { step: 'awaiting_license_back_image', license_file_id: fileId })
     session = (await ensureCustomer(session)) ?? session
     await persistBooking(session, 'documents_pending')
+    try {
+      await notifyAdminDocumentUpload({
+        bookingId: session.booking_id ?? '',
+        chatId,
+        fileId,
+        documentKind: 'license_front',
+      })
+    } catch (error) {
+      console.error('notifyAdminDocumentUpload failed for license front', error)
+    }
     await sendMessage(chatId, TEXT.licenseBack[locale])
     return
   }
@@ -1914,6 +1934,16 @@ async function handleMessage(message: TelegramMessage) {
     session = await saveSession(chatId, { step: 'awaiting_terms_acceptance', license_back_file_id: fileId })
     session = (await ensureCustomer(session)) ?? session
     await persistBooking(session, 'confirmed_booking')
+    try {
+      await notifyAdminDocumentUpload({
+        bookingId: session.booking_id ?? '',
+        chatId,
+        fileId,
+        documentKind: 'license_back',
+      })
+    } catch (error) {
+      console.error('notifyAdminDocumentUpload failed for license back', error)
+    }
     await sendMessage(chatId, TEXT.bookingConfirmed[locale], getTermsLanguageButtons(config))
     return
   }

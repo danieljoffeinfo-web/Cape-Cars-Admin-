@@ -403,16 +403,16 @@ async function sendCustomerBookingConfirmed(booking: TelegramBookingWithCustomer
   })
 }
 
-function customerChatUrl(chatId: string, username?: string | null) {
-  if (username) return `https://t.me/${username}`
-  return `tg://user?id=${chatId}`
+function customerChatButtonRow(_chatId: string, username?: string | null): InlineButton[] | null {
+  if (!username) return null
+  return [{ text: 'Speak to Customer', url: `https://t.me/${username}` }]
 }
 
 function bookingActionButtons(booking: TelegramBookingWithCustomer) {
   const customer = customerShape(booking)
-  const rows: InlineButton[][] = [
-    [{ text: 'Speak to Customer', url: customerChatUrl(booking.chat_id, customer?.telegram_username || null) }],
-  ]
+  const rows: InlineButton[][] = []
+  const customerRow = customerChatButtonRow(booking.chat_id, customer?.telegram_username || null)
+  if (customerRow) rows.push(customerRow)
 
   if (['draft', 'quote_ready', 'customer_details_pending', 'documents_pending', 'pending'].includes(booking.status)) {
     rows.push([{ text: 'Confirmed Booking', callback_data: `admin:booking_confirm:${booking.id}` }])
@@ -780,9 +780,12 @@ export async function notifyAdminManagerRequest(input: {
     `Language: ${input.locale === 'ru' ? 'Russian' : 'English'}`,
   ].filter(Boolean).join('\n')
 
-  await Promise.all(adminChatIds.map((adminChatId) => sendMessage(adminChatId, summary, [
-    [{ text: 'Speak to Customer', url: customerChatUrl(input.chatId, input.username || null) }],
-  ])))
+  const buttons = (() => {
+    const row = customerChatButtonRow(input.chatId, input.username || null)
+    return row ? [row] : undefined
+  })()
+
+  await Promise.all(adminChatIds.map((adminChatId) => sendMessage(adminChatId, summary, buttons)))
 
   await logTelegramConversation({
     chatId: input.chatId,
@@ -844,11 +847,14 @@ export async function notifyAdminNewBooking(input: {
     'Status: pending',
   ].join('\n')
 
+  const contactRow = customerChatButtonRow(input.chatId, input.username || null)
+  const buttons = [
+    ...(contactRow ? [contactRow] : []),
+    [{ text: 'Confirmed Booking', callback_data: `admin:booking_confirm:${input.bookingId}` }],
+  ]
+
   await Promise.all(adminChatIds.map(async (adminChatId) => {
-    await sendMessage(adminChatId, summary, [
-      [{ text: 'Speak to Customer', url: customerChatUrl(input.chatId, input.username || null) }],
-      [{ text: 'Confirmed Booking', callback_data: `admin:booking_confirm:${input.bookingId}` }],
-    ])
+    await sendMessage(adminChatId, summary, buttons)
     await sendPhotoBestEffort(adminChatId, input.idFileId ?? null, `Passport / ID — ${input.customerName || 'Customer'}`)
     await sendPhotoBestEffort(adminChatId, input.licenseFileId ?? null, `Driver’s license front — ${input.customerName || 'Customer'}`)
     await sendPhotoBestEffort(adminChatId, input.licenseBackFileId ?? null, `Driver’s license back — ${input.customerName || 'Customer'}`)
@@ -860,6 +866,65 @@ export async function notifyAdminNewBooking(input: {
     messageType: 'text',
     body: marker,
     meta: { bookingId: input.bookingId, adminChatIds },
+  })
+}
+
+export async function notifyAdminDocumentUpload(input: {
+  bookingId: string
+  chatId: string
+  fileId?: string | null
+  documentKind: 'id_passport' | 'license_front' | 'license_back'
+}) {
+  if (!input.bookingId || !input.fileId) return
+
+  const adminChatIds = await getAdminSubscriberChatIds()
+  if (adminChatIds.length === 0) return
+
+  const marker = `ADMIN_DOCUMENT_UPLOAD_SENT:${input.bookingId}:${input.documentKind}:${input.fileId}`
+  const alreadySent = await hasTelegramConversationMarker(input.chatId, marker)
+  if (alreadySent) return
+
+  const booking = await getTelegramBookingById(input.bookingId)
+  const customer = booking ? customerShape(booking) : null
+  const customerName = customer?.full_name || customer?.telegram_name || input.chatId
+  const documentLabel = input.documentKind === 'id_passport'
+    ? 'Passport / ID'
+    : input.documentKind === 'license_front'
+      ? 'Driver’s license front'
+      : 'Driver’s license back'
+
+  const summary = booking
+    ? [
+      `${documentLabel} received`,
+      '',
+      `Code: ${bookingCode(booking.id)}`,
+      `Customer: ${customerName}`,
+      `Phone: ${customer?.phone || 'No phone yet'}`,
+      `Vehicle: ${booking.vehicle_name || 'Vehicle pending'}`,
+      `Dates: ${booking.start_date || 'No start date'} → ${booking.end_date || 'No end date'}`,
+      `Status: ${booking.status}`,
+    ].join('\n')
+    : [
+      `${documentLabel} received`,
+      '',
+      `Code: ${bookingCode(input.bookingId)}`,
+      `Customer Telegram ID: ${input.chatId}`,
+    ].join('\n')
+
+  const contactRow = customerChatButtonRow(input.chatId, customer?.telegram_username || null)
+  const buttons = contactRow ? [contactRow] : undefined
+
+  await Promise.all(adminChatIds.map(async (adminChatId) => {
+    await sendMessage(adminChatId, summary, buttons)
+    await sendPhotoBestEffort(adminChatId, input.fileId ?? null, `${documentLabel} — ${customerName}`)
+  }))
+
+  await logTelegramConversation({
+    chatId: input.chatId,
+    direction: 'outbound',
+    messageType: 'text',
+    body: marker,
+    meta: { bookingId: input.bookingId, adminChatIds, documentKind: input.documentKind },
   })
 }
 
@@ -897,11 +962,14 @@ export async function notifyAdminPaymentProof(input: {
       `Customer Telegram ID: ${input.chatId}`,
     ].join('\n')
 
+  const contactRow = customerChatButtonRow(input.chatId, customer?.telegram_username || null)
+  const buttons = [
+    ...(contactRow ? [contactRow] : []),
+    [{ text: 'Payment received', callback_data: `admin:booking_paid:${input.bookingId}` }],
+  ]
+
   await Promise.all(adminChatIds.map(async (adminChatId) => {
-    await sendMessage(adminChatId, summary, [
-      [{ text: 'Speak to Customer', url: customerChatUrl(input.chatId, customer?.telegram_username || null) }],
-      [{ text: 'Payment received', callback_data: `admin:booking_paid:${input.bookingId}` }],
-    ])
+    await sendMessage(adminChatId, summary, buttons)
     await sendPhotoBestEffort(adminChatId, input.paymentProofFileId ?? null, `Payment proof — ${booking ? bookingCode(booking.id) : input.chatId}`)
   }))
 
@@ -946,10 +1014,13 @@ export async function notifyAdminCashPayment(input: {
       `Customer Telegram ID: ${input.chatId}`,
     ].join('\n')
 
-  await Promise.all(adminChatIds.map((adminChatId) => sendMessage(adminChatId, summary, [
-    [{ text: 'Speak to Customer', url: customerChatUrl(input.chatId, customer?.telegram_username || null) }],
+  const contactRow = customerChatButtonRow(input.chatId, customer?.telegram_username || null)
+  const buttons = [
+    ...(contactRow ? [contactRow] : []),
     [{ text: 'Confirmed Booking', callback_data: `admin:booking_confirm:${input.bookingId}` }],
-  ])))
+  ]
+
+  await Promise.all(adminChatIds.map((adminChatId) => sendMessage(adminChatId, summary, buttons)))
 
   await logTelegramConversation({
     chatId: input.chatId,
