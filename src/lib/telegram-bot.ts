@@ -1058,7 +1058,14 @@ async function ensureActiveBooking(chatId: string, session: BotSession, locale: 
   const booking = await getTelegramBookingById(session.booking_id)
   if (!booking) return true
 
-  if (['expired', 'cancelled'].includes(booking.status) || !bookingHoldIsActive(booking)) {
+  if (['expired', 'cancelled'].includes(booking.status)) {
+    memorySessions.delete(chatId)
+    await sendMessage(chatId, TEXT.bookingExpired[locale])
+    return false
+  }
+
+  const holdTimerStatuses = ['pending', 'confirmed_booking', 'customer_details_pending', 'documents_pending']
+  if (holdTimerStatuses.includes(booking.status) && !bookingHoldIsActive(booking)) {
     memorySessions.delete(chatId)
     await sendMessage(chatId, TEXT.bookingExpired[locale])
     return false
