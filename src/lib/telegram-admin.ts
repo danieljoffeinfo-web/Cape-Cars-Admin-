@@ -33,6 +33,7 @@ export type TelegramBookingUpsert = {
   licenseFileId?: string | null
   licenseBackFileId?: string | null
   status?: string | null
+  holdExpiresAt?: string | null
 }
 
 export type TelegramBookingWithCustomer = {
@@ -186,9 +187,41 @@ export function publicBaseUrl() {
   return fromEnv.startsWith('http') ? fromEnv : `https://${fromEnv}`
 }
 
-function bookingHoldIsActive(booking: { status: string, created_at: string, hold_expires_at?: string | null, released_at?: string | null }) {
+const CALENDAR_BLOCK_STATUSES = [
+  'customer_details_pending',
+  'documents_pending',
+  'pending',
+  'confirmed_booking',
+  'awaiting_payment_confirmation',
+  'confirmed',
+  'payment_collected',
+] as const
+
+const HOLD_TIMER_STATUSES = [
+  'customer_details_pending',
+  'documents_pending',
+  'pending',
+  'confirmed_booking',
+] as const
+
+function holdExpiresAtForBooking(booking: { created_at: string, hold_expires_at?: string | null }) {
+  if (booking.hold_expires_at) return new Date(booking.hold_expires_at).getTime()
+  return new Date(booking.created_at).getTime() + HOLD_WINDOW_HOURS * 60 * 60 * 1000
+}
+
+export function bookingHoldIsActive(booking: { status: string, created_at: string, hold_expires_at?: string | null, released_at?: string | null }) {
   if (booking.released_at) return false
-  return ['customer_details_pending', 'documents_pending', 'pending', 'confirmed_booking', 'awaiting_payment_confirmation', 'confirmed', 'payment_collected'].includes(booking.status)
+  if (!CALENDAR_BLOCK_STATUSES.includes(booking.status as typeof CALENDAR_BLOCK_STATUSES[number])) return false
+
+  if (['awaiting_payment_confirmation', 'confirmed', 'payment_collected'].includes(booking.status)) {
+    return true
+  }
+
+  if (HOLD_TIMER_STATUSES.includes(booking.status as typeof HOLD_TIMER_STATUSES[number])) {
+    return Date.now() < holdExpiresAtForBooking(booking)
+  }
+
+  return false
 }
 
 export function buildTelegramProxyUrl(fileId: string) {
@@ -208,6 +241,9 @@ function deriveBookingCode(bookingId: string) {
 }
 
 function deriveHoldExpiresAt(status?: string | null) {
+  if (status && HOLD_TIMER_STATUSES.includes(status as typeof HOLD_TIMER_STATUSES[number])) {
+    return pendingHoldExpiresAt(new Date().toISOString())
+  }
   return null
 }
 
@@ -302,6 +338,20 @@ export async function upsertTelegramBooking(input: TelegramBookingUpsert) {
   if (!supabase) return null
 
   try {
+    const existing = await getTelegramBookingById(input.bookingId)
+    const nextStatus = input.status ?? 'draft'
+    let holdExpiresAt: string | null = existing?.hold_expires_at ?? null
+
+    if (input.holdExpiresAt !== undefined) {
+      holdExpiresAt = input.holdExpiresAt
+    } else if (nextStatus === 'awaiting_payment_confirmation' || nextStatus === 'confirmed' || nextStatus === 'payment_collected') {
+      holdExpiresAt = null
+    } else if (nextStatus === 'draft' || nextStatus === 'quote_ready' || nextStatus === 'cancelled' || nextStatus === 'expired') {
+      holdExpiresAt = null
+    } else if (nextStatus === 'confirmed_booking' && !holdExpiresAt) {
+      holdExpiresAt = pendingHoldExpiresAt(new Date().toISOString())
+    }
+
     const payload = {
       id: input.bookingId,
       chat_id: input.chatId,
@@ -317,9 +367,9 @@ export async function upsertTelegramBooking(input: TelegramBookingUpsert) {
       license_file_id: input.licenseFileId ?? null,
       license_back_file_id: input.licenseBackFileId ?? null,
       booking_code: deriveBookingCode(input.bookingId),
-      hold_expires_at: deriveHoldExpiresAt(input.status ?? 'draft'),
+      hold_expires_at: holdExpiresAt,
       released_at: null,
-      status: input.status ?? 'draft',
+      status: nextStatus,
       updated_at: new Date().toISOString(),
     }
 
@@ -404,10 +454,21 @@ export async function updateTelegramBookingStatus(bookingId: string, status: str
   if (!supabase) return null
 
   try {
+    const existing = await getTelegramBookingById(bookingId)
     const releaseStatuses = ['expired', 'cancelled']
+    let holdExpiresAt: string | null = existing?.hold_expires_at ?? null
+
+    if (status === 'awaiting_payment_confirmation' || status === 'confirmed' || status === 'payment_collected') {
+      holdExpiresAt = null
+    } else if (status === 'confirmed_booking' && !holdExpiresAt) {
+      holdExpiresAt = pendingHoldExpiresAt(new Date().toISOString())
+    } else if (releaseStatuses.includes(status) || status === 'draft' || status === 'quote_ready') {
+      holdExpiresAt = null
+    }
+
     const payload = {
       status,
-      hold_expires_at: deriveHoldExpiresAt(status),
+      hold_expires_at: holdExpiresAt,
       released_at: releaseStatuses.includes(status) ? new Date().toISOString() : null,
       updated_at: new Date().toISOString(),
     }
@@ -535,13 +596,13 @@ export async function releaseExpiredPendingBookings() {
     let result: any = await supabase
       .from('telegram_bookings')
       .select('id, created_at, hold_expires_at, status, released_at')
-      .in('status', ['pending', 'pre_confirmation'])
+      .in('status', [...HOLD_TIMER_STATUSES, 'pre_confirmation'])
 
     if (result.error && isMissingColumnError(result.error)) {
       result = await supabase
         .from('telegram_bookings')
         .select('id, created_at, status')
-        .in('status', ['pending', 'pre_confirmation'])
+        .in('status', [...HOLD_TIMER_STATUSES, 'pre_confirmation'])
     }
 
     if (result.error) {
@@ -550,7 +611,13 @@ export async function releaseExpiredPendingBookings() {
     }
 
     const expiredIds = ((result.data ?? []) as Array<{ id: string, created_at: string, hold_expires_at?: string | null, status: string, released_at?: string | null }>)
-      .filter((booking) => !bookingHoldIsActive(booking) && !booking.released_at)
+      .filter((booking) => {
+        if (booking.released_at) return false
+        if (!HOLD_TIMER_STATUSES.includes(booking.status as typeof HOLD_TIMER_STATUSES[number]) && booking.status !== 'pre_confirmation') {
+          return false
+        }
+        return Date.now() >= holdExpiresAtForBooking(booking)
+      })
       .map((booking) => booking.id)
 
     if (expiredIds.length === 0) return 0

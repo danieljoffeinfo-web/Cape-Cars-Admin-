@@ -435,7 +435,7 @@ function bookingActionButtons(booking: TelegramBookingWithCustomer) {
   const customerRow = customerChatButtonRow(booking.chat_id, customer?.telegram_username || null)
   if (customerRow) rows.push(customerRow)
 
-  if (['draft', 'quote_ready', 'customer_details_pending', 'documents_pending', 'pending'].includes(booking.status)) {
+  if (booking.status === 'pending') {
     rows.push([{ text: 'Подтвердить бронирование', callback_data: `admin:booking_confirm:${booking.id}` }])
     rows.push([{ text: 'Не подтверждать', callback_data: `admin:booking_decline:${booking.id}` }])
   }
@@ -874,7 +874,7 @@ export async function notifyAdminNewBooking(input: {
 
   const booking = await getTelegramBookingById(input.bookingId)
   if (booking) {
-    await Promise.all(adminChatIds.map((adminChatId) => sendBookingSummary(adminChatId, booking, 'Запрос на подтверждение доступности')))
+    await Promise.all(adminChatIds.map((adminChatId) => sendBookingSummary(adminChatId, booking, 'Новое бронирование')))
     await logTelegramConversation({
       chatId: input.chatId,
       direction: 'outbound',
@@ -886,8 +886,9 @@ export async function notifyAdminNewBooking(input: {
   }
 
   const telegramHandle = input.username ? `@${input.username}` : 'Нет username'
+  const holdUntil = pendingHoldExpiresAt(new Date().toISOString())
   const summary = [
-    'Запрос на подтверждение доступности',
+    'Новое бронирование',
     '',
     `Код: ${bookingCode(input.bookingId)}`,
     `Клиент: ${input.customerName || 'Клиент неизвестен'}`,
@@ -899,15 +900,12 @@ export async function notifyAdminNewBooking(input: {
     `Даты: ${input.startDate || 'Дата не указана'} → ${input.endDate || 'Дата не указана'}`,
     `Дней: ${input.totalDays || 0}`,
     `Итого: ${input.totalAmount ? money(input.totalAmount) : 'Сумма не указана'}`,
-    'Статус: ожидание',
+    'Статус: подтверждено клиентом',
+    `Оплата до: ${new Date(holdUntil).toLocaleString('ru-RU')}`,
   ].join('\n')
 
   const contactRow = customerChatButtonRow(input.chatId, input.username || null)
-  const buttons = [
-    ...(contactRow ? [contactRow] : []),
-    [{ text: 'Подтвердить бронирование', callback_data: `admin:booking_confirm:${input.bookingId}` }],
-    [{ text: 'Не подтверждать', callback_data: `admin:booking_decline:${input.bookingId}` }],
-  ]
+  const buttons = contactRow ? [contactRow] : undefined
 
   const customerName = input.customerName || 'Клиент'
   await Promise.all(adminChatIds.map(async (adminChatId) => {
@@ -1079,8 +1077,7 @@ export async function notifyAdminCashPayment(input: {
   const contactRow = customerChatButtonRow(input.chatId, customer?.telegram_username || null)
   const buttons = [
     ...(contactRow ? [contactRow] : []),
-    [{ text: 'Подтвердить бронирование', callback_data: `admin:booking_confirm:${input.bookingId}` }],
-    [{ text: 'Не подтверждать', callback_data: `admin:booking_decline:${input.bookingId}` }],
+    [{ text: 'Оплата получена', callback_data: `admin:booking_paid:${input.bookingId}` }],
   ]
 
   await Promise.all(adminChatIds.map((adminChatId) => sendMessage(adminChatId, summary, buttons)))

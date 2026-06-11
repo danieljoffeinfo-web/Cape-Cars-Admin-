@@ -200,7 +200,8 @@ export default function BookingsPage() {
 
   const filtered = filterStatus === 'all' ? bookings : bookings.filter((booking) => booking.status === filterStatus)
   const statusLabel = (status: string) => STATUS_LABELS[status]?.[locale] ?? status.replace(/_/g, ' ')
-  const canConfirm = (booking: TelegramBooking) => !['confirmed', 'cancelled', 'expired'].includes(booking.status)
+  const canConfirm = (booking: TelegramBooking) => ['awaiting_payment_confirmation', 'confirmed_booking', 'documents_pending', 'customer_details_pending', 'pending'].includes(booking.status)
+  const hasActiveHold = (booking: TelegramBooking) => ['pending', 'confirmed_booking', 'customer_details_pending', 'documents_pending'].includes(booking.status)
   const activeCalendarBookings = useMemo(() => bookings.filter((booking) => (
     booking.start_date
     && booking.end_date
@@ -241,7 +242,7 @@ export default function BookingsPage() {
       <div className="flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-light text-neutral-900">{t('Bookings', 'Бронирования')}</h1>
-          <p className="mt-1 text-sm text-neutral-500">{t('Review documents and confirm bookings from the Telegram flow.', 'Проверяйте документы и подтверждайте бронирования из Telegram.')}</p>
+          <p className="mt-1 text-sm text-neutral-500">{t('Bookings are confirmed automatically in Telegram. Review documents and mark payment as received.', 'Бронирования подтверждаются автоматически в Telegram. Проверяйте документы и отмечайте получение оплаты.')}</p>
           <p className="mt-1 text-xs text-neutral-400">
             {lastUpdatedAt
               ? t(
@@ -400,7 +401,7 @@ export default function BookingsPage() {
             <div className="md:hidden divide-y divide-black/[0.06]">
               {filtered.map((booking) => {
                 const holdUntil = pendingUntil(booking.created_at, booking.hold_expires_at)
-                const holdExpired = booking.status === 'pending' && holdUntil.getTime() < Date.now()
+                const holdExpired = hasActiveHold(booking) && holdUntil.getTime() < Date.now()
                 const isExpanded = expandedId === booking.id
 
                 return (
@@ -431,9 +432,9 @@ export default function BookingsPage() {
                         </div>
                       </div>
 
-                      {booking.status === 'pending' && (
+                      {hasActiveHold(booking) && (
                         <div className={`text-[11px] ${holdExpired ? 'text-red-500' : 'text-amber-600'}`}>
-                          {t('Hold until', 'Резерв до')} {holdUntil.toLocaleString(locale === 'ru' ? 'ru-RU' : 'en-ZA')}
+                          {t('Payment due by', 'Оплата до')} {holdUntil.toLocaleString(locale === 'ru' ? 'ru-RU' : 'en-ZA')}
                         </div>
                       )}
                     </button>
@@ -502,7 +503,7 @@ export default function BookingsPage() {
                 <tbody className="divide-y divide-black/[0.04]">
                   {filtered.map((booking) => {
                     const holdUntil = pendingUntil(booking.created_at, booking.hold_expires_at)
-                    const holdExpired = booking.status === 'pending' && holdUntil.getTime() < Date.now()
+                    const holdExpired = hasActiveHold(booking) && holdUntil.getTime() < Date.now()
 
                     return (
                       <>
@@ -511,9 +512,9 @@ export default function BookingsPage() {
                           <td className="px-5 py-4">
                             <div className="font-medium text-neutral-900">{booking.telegram_customers?.full_name || booking.telegram_customers?.telegram_name || 'Unnamed customer'}</div>
                             <div className="text-xs text-neutral-400 mt-0.5">{booking.telegram_customers?.phone || booking.chat_id}</div>
-                            {booking.status === 'pending' && (
+                            {hasActiveHold(booking) && (
                               <div className={`text-[11px] mt-1 ${holdExpired ? 'text-red-500' : 'text-amber-600'}`}>
-                                {t('Hold until', 'Резерв до')} {holdUntil.toLocaleString(locale === 'ru' ? 'ru-RU' : 'en-ZA')}
+                                {t('Payment due by', 'Оплата до')} {holdUntil.toLocaleString(locale === 'ru' ? 'ru-RU' : 'en-ZA')}
                               </div>
                             )}
                           </td>

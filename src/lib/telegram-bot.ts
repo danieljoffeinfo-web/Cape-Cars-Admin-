@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { createClient } from '@supabase/supabase-js'
 import { CATEGORY_ORDER, TELEGRAM_CATALOG, getTelegramBodyType, getTelegramSegment, getTelegramVehicleDisplay, type TelegramBodyType, type TelegramSegment, type VehicleCategory } from '@/lib/telegram-catalog'
-import { buildTelegramProxyUrl, getLatestTelegramBookingForChat, getTelegramSession, getVehicleById, getVehiclesForCustomerCategory, logTelegramConversation, publicBaseUrl, type VehicleBlockedRange, upsertTelegramBooking, upsertTelegramCustomer, upsertTelegramSession } from '@/lib/telegram-admin'
+import { bookingHoldIsActive, buildTelegramProxyUrl, getLatestTelegramBookingForChat, getTelegramBookingById, getTelegramSession, getVehicleById, getVehiclesForCustomerCategory, logTelegramConversation, pendingHoldExpiresAt, publicBaseUrl, releaseExpiredPendingBookings, syncTelegramBookingToRental, type VehicleBlockedRange, upsertTelegramBooking, upsertTelegramCustomer, upsertTelegramSession } from '@/lib/telegram-admin'
 import { notifyAdminCashPayment, notifyAdminDocumentUpload, notifyAdminManagerRequest, notifyAdminNewBooking, notifyAdminPaymentProof } from '@/lib/telegram-admin-bot'
 
 type Locale = 'en' | 'ru'
@@ -14,7 +14,6 @@ export type SessionStep =
   | 'awaiting_start_date'
   | 'awaiting_end_date'
   | 'awaiting_confirmation'
-  | 'awaiting_admin_confirmation'
   | 'awaiting_full_name'
   | 'awaiting_phone'
   | 'awaiting_id_image'
@@ -167,6 +166,15 @@ const DAY_NAMES: Record<Locale, string[]> = {
   ru: ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'],
 }
 
+function formatHoldDeadline(iso: string, locale: Locale) {
+  return new Date(iso).toLocaleString(locale === 'ru' ? 'ru-RU' : 'en-ZA', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 const TEXT = {
   welcome: {
     en: '👋 Welcome to Cape Cars Rentals! We’re happy to help. Please choose an option below.',
@@ -192,13 +200,45 @@ const TEXT = {
     en: (model: string) => `✅ Book ${model}`,
     ru: (model: string) => `✅ Забронировать ${model}`,
   },
+  vehicleSubstitutionNotice: {
+    en: 'ℹ️ The exact vehicle selected is not always guaranteed. If a substitution is needed, you will receive a similar vehicle of the same class or better — never an inferior one.',
+    ru: 'ℹ️ Точная модель автомобиля не всегда гарантируется. При необходимости замены вы получите автомобиль того же класса или лучше — никогда худшего.',
+  },
   calendarStart: {
-    en: (model: string) => `📅 ${model}\n\nPlease select your start date.\n• = already booked`,
-    ru: (model: string) => `📅 ${model}\n\nПожалуйста, выберите дату начала аренды.\n• = уже забронировано`,
+    en: (model: string) => [
+      `📅 ${model}`,
+      '',
+      'Please select your start date.',
+      '• = already booked',
+      '',
+      TEXT.vehicleSubstitutionNotice.en,
+    ].join('\n'),
+    ru: (model: string) => [
+      `📅 ${model}`,
+      '',
+      'Пожалуйста, выберите дату начала аренды.',
+      '• = уже забронировано',
+      '',
+      TEXT.vehicleSubstitutionNotice.ru,
+    ].join('\n'),
   },
   calendarEnd: {
-    en: (startDate: string) => `📅 Start date: ${startDate}\n\nNow please select your return date.\n• = already booked`,
-    ru: (startDate: string) => `📅 Дата начала: ${startDate}\n\nТеперь, пожалуйста, выберите дату возврата.\n• = уже забронировано`,
+    en: (startDate: string) => [
+      `📅 Start date: ${startDate}`,
+      '',
+      'Now please select your return date.',
+      '• = already booked',
+      '',
+      TEXT.vehicleSubstitutionNotice.en,
+    ].join('\n'),
+    ru: (startDate: string) => [
+      `📅 Дата начала: ${startDate}`,
+      '',
+      'Теперь, пожалуйста, выберите дату возврата.',
+      '• = уже забронировано',
+      '',
+      TEXT.vehicleSubstitutionNotice.ru,
+    ].join('\n'),
   },
   confirmSummary: {
     en: (model: string, dailyRate: number, days: number, totalAmount: number, startDate: string, endDate: string) => [
@@ -208,6 +248,11 @@ const TEXT = {
       '',
       `📍 Start date: ${startDate}`,
       `📍 End date: ${endDate}`,
+      '',
+      'When you tap Confirm, these dates are reserved on our calendar.',
+      'You will have 24 hours to complete your details and send payment proof.',
+      '',
+      TEXT.vehicleSubstitutionNotice.en,
       '',
       '😊 Would you like to confirm, make changes, or view other vehicles?',
     ].join('\n'),
@@ -219,8 +264,41 @@ const TEXT = {
       `📍 Дата начала: ${startDate}`,
       `📍 Дата окончания: ${endDate}`,
       '',
+      'После нажатия «Подтвердить» эти даты будут зарезервированы в нашем календаре.',
+      'У вас будет 24 часа, чтобы заполнить данные и отправить подтверждение оплаты.',
+      '',
+      TEXT.vehicleSubstitutionNotice.ru,
+      '',
       '😊 Подтвердить, изменить данные или посмотреть другие автомобили?',
     ].join('\n'),
+  },
+  datesUnavailable: {
+    en: '⚠️ Those dates are no longer available for this vehicle. Please choose different dates.',
+    ru: '⚠️ Эти даты больше недоступны для выбранного автомобиля. Пожалуйста, выберите другие даты.',
+  },
+  bookingReserved: {
+    en: (code: string, holdUntil: string) => [
+      `✅ Booking ${code} confirmed — these dates are now reserved on our calendar.`,
+      '',
+      `⏰ Please complete your details and send payment proof within 24 hours (by ${formatHoldDeadline(holdUntil, 'en')}) to keep this reservation.`,
+      '',
+      TEXT.vehicleSubstitutionNotice.en,
+      '',
+      '📝 First, please send your full name and surname.',
+    ].join('\n'),
+    ru: (code: string, holdUntil: string) => [
+      `✅ Бронирование ${code} подтверждено — эти даты зарезервированы в нашем календаре.`,
+      '',
+      `⏰ Пожалуйста, заполните данные и отправьте подтверждение оплаты в течение 24 часов (до ${formatHoldDeadline(holdUntil, 'ru')}), чтобы сохранить бронь.`,
+      '',
+      TEXT.vehicleSubstitutionNotice.ru,
+      '',
+      '📝 Сначала отправьте ваше полное имя и фамилию.',
+    ].join('\n'),
+  },
+  bookingExpired: {
+    en: '⏰ Your 24-hour reservation window has expired and the dates have been released. Send /start to begin a new booking.',
+    ru: '⏰ 24-часовой срок резерва истёк, и даты были освобождены. Отправьте /start, чтобы начать новое бронирование.',
   },
   fullName: {
     en: '📝 Please send your full name and surname.',
@@ -294,6 +372,10 @@ const TEXT = {
       totalAmount ? `Rental total: ${formatCurrency(totalAmount)}.` : null,
       '🚗 The remaining rental balance is due upfront on collection, before the vehicle is released.',
       '',
+      '⏰ Send payment proof within 24 hours of confirming your booking to keep the reservation.',
+      '',
+      TEXT.vehicleSubstitutionNotice.en,
+      '',
       '📤 Please send proof of payment after payment.',
     ].filter(Boolean).join('\n'),
     ru: (totalAmount?: number | null) => [
@@ -307,6 +389,10 @@ const TEXT = {
       totalAmount ? `Итоговая сумма аренды: ${formatCurrency(totalAmount)}.` : null,
       '🚗 Оставшаяся сумма аренды оплачивается полностью при получении автомобиля, до передачи ключей.',
       '',
+      '⏰ Отправьте подтверждение оплаты в течение 24 часов после подтверждения бронирования, чтобы сохранить резерв.',
+      '',
+      TEXT.vehicleSubstitutionNotice.ru,
+      '',
       '📤 Пожалуйста, отправьте подтверждение оплаты после перевода.',
     ].filter(Boolean).join('\n'),
   },
@@ -319,12 +405,8 @@ const TEXT = {
     ru: '📸 Пожалуйста, отправьте сюда скриншот или фото подтверждения оплаты.',
   },
   paymentProofReceived: {
-    en: '✅ Payment proof received. Cape Cars admin has been notified and will confirm shortly.\n\n🤝 A manager will be in touch shortly.',
-    ru: '✅ Подтверждение оплаты получено. Администратор Cape Cars уведомлён и скоро подтвердит оплату.\n\n🤝 Менеджер свяжется с вами в ближайшее время.',
-  },
-  awaitingAdminApproval: {
-    en: '🕐 Thanks! Your booking request has been sent to Cape Cars admin for availability confirmation.\n\nAs soon as the vehicle and dates are confirmed, we will ask for your passport/ID and driver’s license photos.',
-    ru: '🕐 Спасибо! Ваш запрос на бронирование отправлен администратору Cape Cars для подтверждения доступности.\n\nКак только автомобиль и даты будут подтверждены, мы попросим фото паспорта/ID и водительского удостоверения.',
+    en: '✅ Payment proof received. Your reservation is secured.\n\n🤝 A manager will be in touch shortly.',
+    ru: '✅ Подтверждение оплаты получено. Ваша бронь закреплена.\n\n🤝 Менеджер свяжется с вами в ближайшее время.',
   },
 } as const
 
@@ -419,7 +501,6 @@ function stepRank(step?: SessionStep | string | null) {
     'awaiting_start_date',
     'awaiting_end_date',
     'awaiting_confirmation',
-    'awaiting_admin_confirmation',
     'awaiting_full_name',
     'awaiting_phone',
     'awaiting_id_image',
@@ -434,15 +515,24 @@ function stepRank(step?: SessionStep | string | null) {
   return index === -1 ? 0 : index
 }
 
-function isPostApprovalDocumentStep(step?: SessionStep | string | null) {
-  return [
-    'awaiting_id_image',
-    'awaiting_license_image',
-    'awaiting_license_back_image',
-    'awaiting_terms_acceptance',
-    'awaiting_payment_proof',
-    'completed',
-  ].includes(step ?? '')
+function inferDocumentFlowStep(
+  booking: {
+    status: string
+    id_file_id?: string | null
+    license_file_id?: string | null
+    license_back_file_id?: string | null
+  },
+  customer: { full_name?: string | null, phone?: string | null } | null,
+): SessionStep | null {
+  const activeStatuses = ['pending', 'confirmed_booking', 'customer_details_pending', 'documents_pending']
+  if (!activeStatuses.includes(booking.status)) return null
+  if (!(customer?.full_name ?? null)) return 'awaiting_full_name'
+  if (!(customer?.phone ?? null)) return 'awaiting_phone'
+  if (!booking.id_file_id) return 'awaiting_id_image'
+  if (!booking.license_file_id) return 'awaiting_license_image'
+  if (!booking.license_back_file_id) return 'awaiting_license_back_image'
+  if (booking.status === 'documents_pending') return 'awaiting_terms_acceptance'
+  return 'awaiting_terms_acceptance'
 }
 
 async function restoreSession(chatId: string): Promise<BotSession | null> {
@@ -470,18 +560,8 @@ async function restoreSession(chatId: string): Promise<BotSession | null> {
     if (!booking.start_date) return 'awaiting_start_date'
     if (!booking.end_date || !booking.total_days) return 'awaiting_end_date'
     if (booking.status === 'quote_ready') return 'awaiting_confirmation'
-    if (booking.status === 'pending' && !booking.id_file_id && !booking.license_file_id && !booking.license_back_file_id) {
-      return 'awaiting_admin_confirmation'
-    }
-    if (booking.status === 'customer_details_pending') {
-      if (!(customer?.full_name ?? null)) return 'awaiting_full_name'
-      if (!(customer?.phone ?? null)) return 'awaiting_phone'
-    }
-    if (!booking.id_file_id) return 'awaiting_id_image'
-    if (!booking.license_file_id) return 'awaiting_license_image'
-    if (!booking.license_back_file_id) return 'awaiting_license_back_image'
-    if (booking.status === 'documents_pending') return 'awaiting_terms_acceptance'
-    if (booking.status === 'confirmed_booking') return 'awaiting_terms_acceptance'
+    const documentStep = inferDocumentFlowStep(booking, customer)
+    if (documentStep) return documentStep
     if (booking.status === 'awaiting_payment_confirmation') return 'awaiting_payment_proof'
     return 'completed'
   })()
@@ -522,20 +602,6 @@ async function restorePersistedSession(chatId: string): Promise<BotSession | nul
   const restoredBooking = await restoreSession(chatId)
   const sessionUpdatedAt = new Date(record.updated_at ?? data.updated_at ?? 0).getTime()
   const bookingUpdatedAt = restoredBooking?.updated_at ? new Date(restoredBooking.updated_at).getTime() : 0
-
-  if (
-    restoredBooking
-    && restoredBooking.step === 'awaiting_admin_confirmation'
-    && isPostApprovalDocumentStep(data.step)
-  ) {
-    return {
-      ...defaultSession(chatId),
-      ...restoredBooking,
-      ...data,
-      chat_id: chatId,
-      updated_at: record.updated_at ?? data.updated_at ?? restoredBooking.updated_at ?? new Date().toISOString(),
-    }
-  }
 
   if (
     restoredBooking
@@ -966,6 +1032,39 @@ async function resolveVehicleChoice(vehicleId: string, source: 'db' | 'static', 
     blockedRanges: [],
     isBlocked: vehicle.status === 'Booked',
   }
+}
+
+function selectedDatesAvailable(blockedRanges: VehicleBlockedRange[], startDate: string, endDate: string) {
+  return !blockedRanges.some((range) => datesOverlap(startDate, endDate, range.startDate, range.endDate))
+}
+
+async function refreshVehicleBlockedRanges(session: BotSession) {
+  if (!session.selected_category || !session.selected_vehicle_model) return session.blocked_ranges ?? []
+
+  const vehicles = await getVehiclesForCustomerCategory(session.selected_category)
+  const displayModel = session.selected_vehicle_display_model ?? session.selected_vehicle_model
+  const matched = vehicles.find((vehicle) => (
+    vehicle.model === displayModel
+    || vehicle.model === session.selected_vehicle_model
+  ))
+
+  return matched?.blockedRanges ?? session.blocked_ranges ?? []
+}
+
+async function ensureActiveBooking(chatId: string, session: BotSession, locale: Locale) {
+  if (!session.booking_id) return true
+
+  await releaseExpiredPendingBookings()
+  const booking = await getTelegramBookingById(session.booking_id)
+  if (!booking) return true
+
+  if (['expired', 'cancelled'].includes(booking.status) || !bookingHoldIsActive(booking)) {
+    memorySessions.delete(chatId)
+    await sendMessage(chatId, TEXT.bookingExpired[locale])
+    return false
+  }
+
+  return true
 }
 
 function datesOverlap(startA: string, endA: string, startB: string, endB: string) {
@@ -1659,12 +1758,69 @@ async function handleCallback(callback: CallbackQuery) {
 
   if (data === 'confirm_booking') {
     await logInboundText(chatId, 'Confirmed booking', 'button')
-    let next = await saveSession(chatId, { step: 'awaiting_admin_confirmation' })
+    const startDate = session.requested_start_date
+    const endDate = session.requested_end_date
+
+    if (!startDate || !endDate || !session.selected_category) {
+      await answerCallbackQuery(callback.id, locale === 'ru' ? 'Нет дат' : 'Missing dates')
+      return
+    }
+
+    await releaseExpiredPendingBookings()
+    const blockedRanges = await refreshVehicleBlockedRanges(session)
+
+    if (!selectedDatesAvailable(blockedRanges, startDate, endDate)) {
+      await answerCallbackQuery(callback.id, locale === 'ru' ? 'Даты заняты' : 'Dates unavailable')
+      const unavailableSession = await saveSession(chatId, {
+        step: 'awaiting_start_date',
+        requested_start_date: null,
+        requested_days: null,
+        requested_end_date: null,
+        total_amount: null,
+        blocked_ranges: blockedRanges,
+      })
+      const config = await getBotControllerConfig()
+      const now = new Date()
+      const keyboard = buildCalendarKeyboard(now.getFullYear(), now.getMonth(), blockedRanges, 'start', locale, null, config)
+      await sendMessage(chatId, TEXT.datesUnavailable[locale])
+      await sendMessage(
+        chatId,
+        TEXT.calendarStart[locale](unavailableSession.selected_vehicle_display_model ?? unavailableSession.selected_vehicle_model ?? ''),
+        keyboard,
+      )
+      return
+    }
+
+    const holdExpiresAt = pendingHoldExpiresAt(new Date().toISOString())
+    let next = await saveSession(chatId, { step: 'awaiting_full_name', blocked_ranges: blockedRanges })
     next = (await ensureCustomer(next)) ?? next
-    await persistBooking(next, 'pending')
+    await upsertTelegramBooking({
+      bookingId: next.booking_id!,
+      chatId: next.chat_id,
+      customerId: next.customer_id ?? null,
+      vehicleName: next.selected_vehicle_model ?? null,
+      vehicleCategory: next.selected_category ?? null,
+      startDate: next.requested_start_date ?? null,
+      totalDays: next.requested_days ?? null,
+      endDate: next.requested_end_date ?? null,
+      dailyRate: next.daily_rate ?? null,
+      totalAmount: next.total_amount ?? null,
+      idFileId: next.id_file_id ?? null,
+      licenseFileId: next.license_file_id ?? null,
+      licenseBackFileId: next.license_back_file_id ?? null,
+      status: 'confirmed_booking',
+      holdExpiresAt,
+    })
+
+    try {
+      const rentalSync = await syncTelegramBookingToRental(next.booking_id!)
+      if (!rentalSync.ok) console.error('syncTelegramBookingToRental failed', rentalSync.error)
+    } catch (error) {
+      console.error('syncTelegramBookingToRental failed', error)
+    }
 
     await answerCallbackQuery(callback.id, locale === 'ru' ? 'Подтверждено' : 'Confirmed')
-    await sendMessage(chatId, TEXT.awaitingAdminApproval[locale])
+    await sendMessage(chatId, TEXT.bookingReserved[locale](bookingCode(next.booking_id), holdExpiresAt))
 
     try {
       await notifyAdminNewBooking({
@@ -1801,10 +1957,7 @@ async function handleMessage(message: TelegramMessage) {
     return
   }
 
-  if (session.step === 'awaiting_admin_confirmation') {
-    await sendMessage(chatId, TEXT.awaitingAdminApproval[locale])
-    return
-  }
+  if (!(await ensureActiveBooking(chatId, session, locale))) return
 
   if (session.step === 'awaiting_confirmation' && text && text.length >= 3 && text.includes(' ')) {
     session = await saveSession(chatId, {
@@ -1933,7 +2086,7 @@ async function handleMessage(message: TelegramMessage) {
     const config = await getBotControllerConfig()
     session = await saveSession(chatId, { step: 'awaiting_terms_acceptance', license_back_file_id: fileId })
     session = (await ensureCustomer(session)) ?? session
-    await persistBooking(session, 'confirmed_booking')
+    await persistBooking(session, 'documents_pending')
     try {
       await notifyAdminDocumentUpload({
         bookingId: session.booking_id ?? '',
@@ -1998,6 +2151,8 @@ async function handleMessage(message: TelegramMessage) {
 }
 
 export async function processTelegramUpdate(update: TelegramUpdate) {
+  await releaseExpiredPendingBookings()
+
   const config = await getBotControllerConfig()
 
   if (config.botEnabled === false) {
