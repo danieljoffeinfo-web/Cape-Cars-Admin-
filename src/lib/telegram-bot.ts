@@ -21,7 +21,12 @@ export type SessionStep =
   | 'awaiting_license_back_image'
   | 'awaiting_terms_acceptance'
   | 'awaiting_payment_proof'
+  | 'awaiting_transfer_direction'
+  | 'awaiting_transfer_date'
+  | 'awaiting_transfer_time'
   | 'completed'
+
+export type TransferDirection = 'from_airport' | 'to_airport'
 
 export type BotSession = {
   chat_id: string
@@ -48,6 +53,9 @@ export type BotSession = {
   license_file_id?: string | null
   license_back_file_id?: string | null
   blocked_ranges?: VehicleBlockedRange[]
+  transfer_direction?: TransferDirection | null
+  transfer_date?: string | null
+  transfer_time?: string | null
   updated_at?: string
 }
 
@@ -173,6 +181,62 @@ function formatHoldDeadline(iso: string, locale: Locale) {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+function transferDirectionLabel(direction: TransferDirection, locale: Locale) {
+  if (locale === 'ru') {
+    return direction === 'from_airport' ? 'Из аэропорта' : 'В аэропорт'
+  }
+  return direction === 'from_airport' ? 'From the airport' : 'To the airport'
+}
+
+function parseTransferDate(text: string): string | null {
+  const trimmed = text.trim()
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch
+    const date = new Date(`${year}-${month}-${day}T00:00:00`)
+    if (Number.isNaN(date.getTime())) return null
+    return `${year}-${month}-${day}`
+  }
+
+  const slashMatch = trimmed.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/)
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch
+    const normalized = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+    const date = new Date(`${normalized}T00:00:00`)
+    if (Number.isNaN(date.getTime())) return null
+    return normalized
+  }
+
+  return null
+}
+
+function isFutureOrTodayDate(dateStr: string) {
+  const today = toIsoDate(new Date())
+  return dateStr >= today
+}
+
+function parseTransferTime(text: string): string | null {
+  const trimmed = text.trim().replace(/\s+/g, '')
+  const match = trimmed.match(/^(\d{1,2})[:.](\d{2})$/)
+  if (!match) return null
+
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
+async function sendTransferDirectionPrompt(chatId: string, locale: Locale, config: BotControllerConfig = {}) {
+  await sendMessage(chatId, TEXT.transferDirectionAsk[locale], [
+    [
+      { text: locale === 'ru' ? '✈️ Из аэропорта' : '✈️ From the airport', callback_data: 'transfer_direction:from_airport' },
+      { text: locale === 'ru' ? '🏙️ В аэропорт' : '🏙️ To the airport', callback_data: 'transfer_direction:to_airport' },
+    ],
+    getBackButton(locale, 'start', config),
+  ])
 }
 
 const TEXT = {
@@ -337,8 +401,28 @@ const TEXT = {
     ru: '😔 Сейчас в этой категории нет автомобилей.',
   },
   airportTransfer: {
-    en: '✈️ Airport transfers are done in high class vehicles such as our Mercedes S-Class and a few other options. Our manager will be in touch with you shortly regarding that.',
-    ru: '✈️ Трансферы из аэропорта выполняются на автомобилях высокого класса, таких как наш Mercedes S-Class, а также на нескольких других вариантах. Наш менеджер свяжется с вами в ближайшее время по этому поводу.',
+    en: '✈️ Thank you! Your airport transfer request has been sent. Our manager will be in touch with you shortly.\n\nTransfers are done in high-class vehicles such as our Mercedes S-Class and other premium options.',
+    ru: '✈️ Спасибо! Ваш запрос на трансфер отправлен. Наш менеджер свяжется с вами в ближайшее время.\n\nТрансферы выполняются на автомобилях высокого класса, таких как Mercedes S-Class и другие премиальные варианты.',
+  },
+  transferDirectionAsk: {
+    en: '✈️ Airport transfer\n\nIs the transfer from the airport or to the airport?',
+    ru: '✈️ Трансфер в/из аэропорта\n\nТрансфер из аэропорта или в аэропорт?',
+  },
+  transferDateAsk: {
+    en: (direction: string) => `📅 ${direction}\n\nWhat date do you need the transfer?\n\nPlease send the date, for example: 2026-06-15 or 15/06/2026`,
+    ru: (direction: string) => `📅 ${direction}\n\nНа какую дату вам нужен трансфер?\n\nОтправьте дату, например: 2026-06-15 или 15/06/2026`,
+  },
+  transferTimeAsk: {
+    en: (date: string) => `🕐 Transfer date: ${date}\n\nWhat time do you need the transfer?\n\nPlease send the time, for example: 14:30`,
+    ru: (date: string) => `🕐 Дата трансфера: ${date}\n\nВо сколько вам нужен трансфер?\n\nОтправьте время, например: 14:30`,
+  },
+  transferInvalidDate: {
+    en: '⚠️ Please send a valid future date, for example: 2026-06-15 or 15/06/2026',
+    ru: '⚠️ Пожалуйста, отправьте корректную будущую дату, например: 2026-06-15 или 15/06/2026',
+  },
+  transferInvalidTime: {
+    en: '⚠️ Please send a valid time, for example: 14:30',
+    ru: '⚠️ Пожалуйста, отправьте корректное время, например: 14:30',
   },
   bookingConfirmed: {
     en: '✅ Booking confirmed! Please choose your language below to review the rental terms.',
@@ -475,6 +559,9 @@ function defaultSession(chatId: string): BotSession {
     license_file_id: null,
     license_back_file_id: null,
     blocked_ranges: [],
+    transfer_direction: null,
+    transfer_date: null,
+    transfer_time: null,
     updated_at: new Date().toISOString(),
   }
 }
@@ -1561,22 +1648,41 @@ async function handleCallback(callback: CallbackQuery) {
     locale = data.replace('airport_transfer:', '') as Locale
     session = await saveSession(chatId, {
       locale,
+      step: 'awaiting_transfer_direction',
+      transfer_direction: null,
+      transfer_date: null,
+      transfer_time: null,
       telegram_name: session.telegram_name ?? formatTelegramName(callback.from),
       telegram_username: session.telegram_username ?? callback.from?.username ?? null,
     })
     session = (await ensureCustomer(session)) ?? session
     const config = await getBotControllerConfig()
-    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Трансфер из аэропорта' : 'Airport transfer')
-    await notifyAdminManagerRequest({
-      chatId,
-      locale,
-      telegramName: session.telegram_name ?? formatTelegramName(callback.from),
-      username: callback.from?.username ?? session.telegram_username ?? null,
-      customerName: session.customer_full_name ?? null,
-      phone: session.customer_phone ?? null,
-      requestType: locale === 'ru' ? 'Запрос на трансфер из аэропорта' : 'Airport transfer request',
+    await answerCallbackQuery(callback.id, locale === 'ru' ? 'Трансфер' : 'Airport transfer')
+    await sendTransferDirectionPrompt(chatId, locale, config)
+    return
+  }
+
+  if (data.startsWith('transfer_direction:')) {
+    const direction = data.replace('transfer_direction:', '') as TransferDirection
+    if (direction !== 'from_airport' && direction !== 'to_airport') {
+      await answerCallbackQuery(callback.id, 'Invalid option')
+      return
+    }
+
+    session = await saveSession(chatId, {
+      step: 'awaiting_transfer_date',
+      transfer_direction: direction,
+      transfer_date: null,
+      transfer_time: null,
     })
-    await sendMessage(chatId, copy(config, 'customerText', locale === 'ru' ? 'airportTransferRu' : 'airportTransferEn', TEXT.airportTransfer[locale]), [getBackButton(locale, 'start', config)])
+    const config = await getBotControllerConfig()
+    await answerCallbackQuery(callback.id)
+    await logInboundText(chatId, transferDirectionLabel(direction, locale), 'button')
+    await sendMessage(
+      chatId,
+      TEXT.transferDateAsk[locale](transferDirectionLabel(direction, locale)),
+      [getBackButton(locale, 'start', config)],
+    )
     return
   }
 
@@ -1944,6 +2050,73 @@ async function handleMessage(message: TelegramMessage) {
 
   if (session.step === 'choosing_vehicle') {
     await sendMessage(chatId, TEXT.chooseVehicle[locale])
+    return
+  }
+
+  if (session.step === 'awaiting_transfer_direction') {
+    const config = await getBotControllerConfig()
+    await sendTransferDirectionPrompt(chatId, locale, config)
+    return
+  }
+
+  if (session.step === 'awaiting_transfer_date') {
+    const parsedDate = parseTransferDate(text)
+    if (!parsedDate || !isFutureOrTodayDate(parsedDate)) {
+      await sendMessage(chatId, TEXT.transferInvalidDate[locale])
+      return
+    }
+
+    session = await saveSession(chatId, {
+      step: 'awaiting_transfer_time',
+      transfer_date: parsedDate,
+    })
+    await sendMessage(chatId, TEXT.transferTimeAsk[locale](parsedDate))
+    return
+  }
+
+  if (session.step === 'awaiting_transfer_time') {
+    const parsedTime = parseTransferTime(text)
+    if (!parsedTime) {
+      await sendMessage(chatId, TEXT.transferInvalidTime[locale])
+      return
+    }
+
+    session = await saveSession(chatId, {
+      step: 'choosing_category',
+      transfer_time: parsedTime,
+    })
+
+    const direction = session.transfer_direction
+    const transferDate = session.transfer_date
+    const config = await getBotControllerConfig()
+
+    try {
+      await notifyAdminManagerRequest({
+        chatId,
+        locale,
+        telegramName: session.telegram_name ?? formatTelegramName(message.from),
+        username: message.from?.username ?? session.telegram_username ?? null,
+        customerName: session.customer_full_name ?? null,
+        phone: session.customer_phone ?? null,
+        requestType: locale === 'ru' ? 'Запрос на трансфер в/из аэропорта' : 'Airport transfer request',
+        transferDirection: direction ?? null,
+        transferDate: transferDate ?? null,
+        transferTime: parsedTime,
+      })
+    } catch (error) {
+      console.error('notifyAdminManagerRequest failed for airport transfer', error)
+    }
+
+    await saveSession(chatId, {
+      transfer_direction: null,
+      transfer_date: null,
+      transfer_time: null,
+    })
+    await sendMessage(
+      chatId,
+      copy(config, 'customerText', locale === 'ru' ? 'airportTransferRu' : 'airportTransferEn', TEXT.airportTransfer[locale]),
+      getCategoryButtons(locale, config),
+    )
     return
   }
 

@@ -815,6 +815,9 @@ export async function notifyAdminManagerRequest(input: {
   customerName?: string | null
   phone?: string | null
   requestType?: string | null
+  transferDirection?: 'from_airport' | 'to_airport' | null
+  transferDate?: string | null
+  transferTime?: string | null
 }) {
   const adminChatIds = await getAdminSubscriberChatIds()
   if (adminChatIds.length === 0) return
@@ -822,10 +825,19 @@ export async function notifyAdminManagerRequest(input: {
   const marker = `ADMIN_MANAGER_REQUEST_SENT:${input.chatId}:${Date.now()}`
 
   const customerLabel = input.customerName || input.telegramName || input.chatId
+  const transferDirectionLabel = input.transferDirection === 'from_airport'
+    ? 'Из аэропорта'
+    : input.transferDirection === 'to_airport'
+      ? 'В аэропорт'
+      : null
+
   const summary = [
     'Запрос к менеджеру',
     '',
     input.requestType ? `Тип запроса: ${input.requestType}` : null,
+    transferDirectionLabel ? `Направление: ${transferDirectionLabel}` : null,
+    input.transferDate ? `Дата трансфера: ${input.transferDate}` : null,
+    input.transferTime ? `Время трансфера: ${input.transferTime}` : null,
     `Клиент: ${customerLabel}`,
     `Telegram: ${input.username ? `@${input.username}` : 'Нет username'}`,
     `Телефон: ${input.phone || 'Телефон не указан'}`,
