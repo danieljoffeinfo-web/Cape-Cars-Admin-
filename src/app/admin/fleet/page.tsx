@@ -150,6 +150,9 @@ export default function FleetAdmin() {
       Convertible: 'Кабриолет',
       Coupe: 'Купе',
       Van: 'Фургон / микроавтобус',
+      Hatchback: 'Хэтчбек',
+      Minibus: 'Микроавтобус',
+      'People Mover': 'Минивэн',
     }
     return locale === 'ru' ? labels[bodyType] ?? bodyType : bodyType
   }

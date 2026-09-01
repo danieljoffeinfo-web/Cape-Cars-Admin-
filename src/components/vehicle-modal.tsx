@@ -151,6 +151,9 @@ export default function VehicleModal({ vehicle, onClose, onSaved }: ModalProps) 
       Convertible: 'Кабриолет',
       Coupe: 'Купе',
       Van: 'Фургон / микроавтобус',
+      Hatchback: 'Хэтчбек',
+      Minibus: 'Микроавтобус',
+      'People Mover': 'Минивэн',
     }
     return locale === 'ru' ? labels[bodyType] ?? bodyType : bodyType
   }

@@ -1,4 +1,4 @@
-import type { VehicleBodyType as TelegramBodyType, VehicleCategory } from './vehicle-taxonomy'
+import type { TelegramBrowseBodyType as TelegramBodyType, VehicleCategory } from './vehicle-taxonomy'
 
 export type { TelegramBodyType, VehicleCategory }
 export type TelegramSegment = 'luxury' | 'mid' | 'economy'
